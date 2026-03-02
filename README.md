@@ -34,7 +34,6 @@ Social media context (platform, author handle, hashtags, engagement metrics) can
   - [classify()](#classify) - Unified function for text, image, and PDF (auto-detects input type)
   - [extract()](#extract) - Unified function for category extraction
   - [explore()](#explore) - Raw category extraction for saturation analysis
-  - [image_score_drawing()](#image_score_drawing)
   - [image_features()](#image_features)
 - [Deprecated Functions](#deprecated-functions)
 - [Contributing & Support](#contributing--support)
@@ -135,6 +134,8 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 - `mode` (str, default=`"image"`): PDF processing mode — `"image"`, `"text"`, or `"both"`
 - `creativity` (float, optional): Temperature setting (0.0–1.0)
 - `chain_of_thought` (bool, default=`False`): Enable step-by-step reasoning
+- `step_back_prompt` (bool, default=`False`): Enable step-back prompting (results inconsistent — see Best Practices)
+- `context_prompt` (bool, default=`False`): Add generic expert context to prompts (no consistent benefit observed)
 - `filename` (str, optional): Output filename for CSV
 - `save_directory` (str, optional): Directory to save results
 - `model_source` (str, default=`"auto"`): Provider — `"auto"`, `"openai"`, `"anthropic"`, `"google"`, `"mistral"`, `"perplexity"`, `"huggingface"`, `"xai"`
@@ -318,40 +319,6 @@ from collections import Counter
 counts = Counter(raw_categories)
 for category, freq in counts.most_common(15):
     print(f"{freq:3d}x  {category}")
-```
-
----
-
-### `image_score_drawing()`
-
-Performs quality scoring of images against a reference description, returning structured results with optional CSV export.
-
-**Parameters:**
-- `reference_image_description` (str): A description of what the model should expect to see
-- `image_input` (list): List of image file paths or folder path containing images
-- `reference_image` (str): A file path to the reference image
-- `api_key` (str): API key for the LLM service
-- `user_model` (str, default=`"gpt-4o"`): Specific vision model to use
-- `creativity` (float, default=0): Temperature setting
-- `safety` (bool, default=False): Enable safety checks
-- `filename` (str, default=`"image_scores.csv"`): Filename for CSV output
-- `save_directory` (str, optional): Directory path to save the CSV file
-- `model_source` (str, default=`"OpenAI"`): Model provider
-
-**Returns:**
-- `pandas.DataFrame`: DataFrame with image paths, quality scores, and analysis details
-
-**Example:**
-
-```python
-import catvader as cat
-
-image_scores = cat.image_score_drawing(
-    reference_image_description='A hand-drawn circle',
-    image_input=['image1.jpg', 'image2.jpg'],
-    user_model="gpt-4o",
-    api_key=api_key
-)
 ```
 
 ---
