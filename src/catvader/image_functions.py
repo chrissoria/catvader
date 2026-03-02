@@ -14,9 +14,10 @@ __all__ = [
 
 
 def _load_image_files(image_input):
-    """Load image files from directory path, single file path, or return list as-is."""
+    """Load image files from directory path, single file path, URL list, or Series."""
     import os
     import glob
+    import pandas as pd
 
     image_extensions = [
         '*.png', '*.jpg', '*.jpeg',
@@ -26,15 +27,17 @@ def _load_image_files(image_input):
         '*.psd'
     ]
 
-    if isinstance(image_input, list):
+    # pandas Series — preserve order and NaN positions
+    if hasattr(image_input, 'tolist'):
+        image_files = image_input.tolist()
+        print(f"Provided a Series of {len(image_files)} images.")
+    elif isinstance(image_input, list):
         image_files = image_input
         print(f"Provided a list of {len(image_input)} images.")
-    elif os.path.isfile(image_input):
-        # Single file path
+    elif isinstance(image_input, str) and os.path.isfile(image_input):
         image_files = [image_input]
         print(f"Provided 1 image file.")
-    elif os.path.isdir(image_input):
-        # Directory path - glob for images
+    elif isinstance(image_input, str) and os.path.isdir(image_input):
         image_files = []
         for ext in image_extensions:
             image_files.extend(glob.glob(os.path.join(image_input, ext)))
@@ -46,21 +49,61 @@ def _load_image_files(image_input):
 
 
 def _encode_image(img_path):
-    """Encode an image file to base64. Returns (encoded_data, extension, is_valid)."""
+    """Encode an image to base64. Accepts local file paths or HTTP/HTTPS URLs.
+
+    Returns (encoded_data, extension, is_valid).
+    """
     import os
     import base64
+    import requests
     from pathlib import Path
+    import pandas as pd
 
-    if img_path is None or not os.path.exists(img_path):
+    # Treat None or NaN as missing
+    if img_path is None:
         return None, None, False
-
-    if os.path.isdir(img_path):
-        return None, None, False
-
     try:
-        with open(img_path, "rb") as f:
+        if pd.isna(img_path):
+            return None, None, False
+    except (TypeError, ValueError):
+        pass
+
+    img_str = str(img_path).strip()
+
+    # --- URL path ---
+    if img_str.startswith("http://") or img_str.startswith("https://"):
+        try:
+            response = requests.get(img_str, timeout=15)
+            response.raise_for_status()
+            encoded = base64.b64encode(response.content).decode("utf-8")
+            # Derive extension from Content-Type header
+            content_type = response.headers.get("Content-Type", "").lower()
+            if "jpeg" in content_type or "jpg" in content_type:
+                ext = "jpeg"
+            elif "png" in content_type:
+                ext = "png"
+            elif "gif" in content_type:
+                ext = "gif"
+            elif "webp" in content_type:
+                ext = "webp"
+            else:
+                # Fall back to URL path extension (strip query string first)
+                url_ext = Path(img_str.split("?")[0]).suffix.lstrip(".").lower()
+                ext = "jpeg" if url_ext in ("jpg", "jpe", "") else url_ext
+            return encoded, ext, True
+        except Exception as e:
+            print(f"Error fetching image URL {img_str}: {e}")
+            return None, None, False
+
+    # --- Local file path ---
+    if not os.path.exists(img_str):
+        return None, None, False
+    if os.path.isdir(img_str):
+        return None, None, False
+    try:
+        with open(img_str, "rb") as f:
             encoded = base64.b64encode(f.read()).decode("utf-8")
-        ext = Path(img_path).suffix.lstrip(".").lower()
+        ext = Path(img_str).suffix.lstrip(".").lower()
         if ext == "jpg":
             ext = "jpeg"
         return encoded, ext, True

@@ -102,7 +102,7 @@ def classify(
     models=None,
     consensus_threshold: Union[str, float] = "majority",
     # Parameters previously only on classify_ensemble
-    survey_question: str = "",
+    feed_question: str = "",
     use_json_schema: bool = True,
     max_workers: int = None,
     fail_strategy: str = "partial",
@@ -172,7 +172,10 @@ def classify(
             - "two-thirds": 67% agreement
             - "unanimous": 100% agreement
             - float: Custom threshold between 0 and 1
-        survey_question (str): The survey question (used when categories="auto").
+        feed_question (str): Context describing what to look for in the feed
+            (used when categories="auto"). When sm_source is set and this is
+            omitted, defaults to "What topics are discussed in these social
+            media posts?"
         use_json_schema (bool): Use JSON schema for structured output. Default True.
         max_workers (int): Max parallel workers for API calls. None = auto.
         fail_strategy (str): How to handle failures - "partial" (default) or "strict".
@@ -234,6 +237,8 @@ def classify(
         _sm_df = fetch_social_media(sm_source, limit=sm_limit, credentials=sm_credentials)
         input_data = _sm_df["text"].tolist()
         print(f"[CatVader] Fetched {len(input_data)} posts.")
+        if not feed_question:
+            feed_question = "What topics are discussed in these social media posts?"
     elif input_data is None:
         raise ValueError(
             "Provide either input_data or sm_source="
@@ -385,7 +390,7 @@ def classify(
         categories=categories,
         models=models,
         input_description=description,
-        survey_question=survey_question,
+        survey_question=feed_question,
         pdf_mode=pdf_mode,
         pdf_dpi=pdf_dpi,
         creativity=creativity,

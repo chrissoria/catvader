@@ -24,7 +24,7 @@ _ENV_PATH = os.path.expanduser(
 )
 
 # Metrics available per-post from the Threads Insights API
-_THREADS_METRICS = "likes,replies,reposts,quotes,views,shares,clicks"
+_THREADS_METRICS = "likes,replies,reposts,quotes,views,shares"
 
 
 def _load_threads_credentials(credentials: dict = None) -> tuple[str, str]:
@@ -46,16 +46,46 @@ def _load_threads_credentials(credentials: dict = None) -> tuple[str, str]:
 
 
 def _get_threads_posts(token: str, user_id: str, limit: int) -> list[dict]:
-    """Fetch recent posts from the Threads API."""
+    """Fetch posts from the Threads API, paginating as needed."""
     url = f"https://graph.threads.net/v1.0/{user_id}/threads"
+    page_size = min(limit, 100)  # API max per page is 100
+    fields = "id,text,timestamp,media_type,media_url,thumbnail_url,children{media_url,media_type}"
     params = {
-        "fields": "id,text,timestamp,media_type",
-        "limit": limit,
+        "fields": fields,
+        "limit": page_size,
         "access_token": token,
     }
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    return r.json().get("data", [])
+    posts = []
+    while len(posts) < limit:
+        r = requests.get(url, params=params)
+        r.raise_for_status()
+        body = r.json()
+        posts.extend(body.get("data", []))
+        cursor = body.get("paging", {}).get("cursors", {}).get("after")
+        if not cursor or not body.get("paging", {}).get("next"):
+            break
+        params = {
+            "fields": fields,
+            "limit": min(page_size, limit - len(posts)),
+            "after": cursor,
+            "access_token": token,
+        }
+    return posts[:limit]
+
+
+def _extract_image_url(post: dict) -> str:
+    """Extract the first image URL from a post, handling carousels."""
+    media_type = post.get("media_type", "")
+    if media_type == "IMAGE":
+        return post.get("media_url", "")
+    if media_type == "VIDEO":
+        return post.get("thumbnail_url", "")
+    if media_type == "CAROUSEL_ALBUM":
+        children = post.get("children", {}).get("data", [])
+        for child in children:
+            if child.get("media_type") == "IMAGE" and child.get("media_url"):
+                return child["media_url"]
+    return ""
 
 
 def _get_threads_insights(token: str, post_id: str) -> dict:
@@ -83,8 +113,8 @@ def fetch_threads(limit: int = 50, credentials: dict = None) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame with columns:
-            post_id, timestamp, text, likes, replies, reposts,
-            quotes, views, shares, clicks
+            post_id, timestamp, media_type, text, image_url,
+            likes, replies, reposts, quotes, views, shares
     """
     token, user_id = _load_threads_credentials(credentials)
     posts = _get_threads_posts(token, user_id, limit)
@@ -94,14 +124,15 @@ def fetch_threads(limit: int = 50, credentials: dict = None) -> pd.DataFrame:
         rows.append({
             "post_id":   post["id"],
             "timestamp": post.get("timestamp"),
+            "media_type": post.get("media_type", ""),
             "text":      post.get("text", ""),
+            "image_url": _extract_image_url(post),
             "likes":     metrics.get("likes", 0),
             "replies":   metrics.get("replies", 0),
             "reposts":   metrics.get("reposts", 0),
             "quotes":    metrics.get("quotes", 0),
             "views":     metrics.get("views", 0),
             "shares":    metrics.get("shares", 0),
-            "clicks":    metrics.get("clicks", 0),
         })
     return pd.DataFrame(rows)
 

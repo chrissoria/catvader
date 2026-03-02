@@ -32,7 +32,7 @@ def get_insights(post_id):
     """Fetch engagement metrics for a single post."""
     url = f"{BASE_URL}/{post_id}/insights"
     params = {
-        "metric": "likes,replies,reposts,quotes,views,shares,clicks",
+        "metric": "likes,replies,reposts,quotes,views,shares",
         "access_token": ACCESS_TOKEN,
     }
     r = requests.get(url, params=params)
@@ -60,7 +60,6 @@ def fetch_posts_df(limit=5):
             "quotes":    metrics.get("quotes", 0),
             "views":     metrics.get("views", 0),
             "shares":    metrics.get("shares", 0),
-            "clicks":    metrics.get("clicks", 0),
         })
     return pd.DataFrame(rows)
 

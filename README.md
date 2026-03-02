@@ -119,14 +119,18 @@ Unified classification function for text, image, and PDF inputs. **Input type is
 Supports both **single-model** and **multi-model ensemble** classification for improved accuracy through consensus voting.
 
 **Parameters:**
-- `input_data`: The data to classify (text list/Series, image paths, or PDF paths)
-- `categories` (list): List of category names for classification
+- `input_data`: The data to classify (text list/Series, image paths, or PDF paths). Omit when using `sm_source`.
+- `categories` (list): List of category names for classification. Use `"auto"` to discover categories automatically.
 - `api_key` (str): API key for the LLM service (single-model mode)
-- `description` (str): Description of the input data context
-- `platform` (str, optional): Social media platform (e.g., `"Twitter/X"`, `"Reddit"`, `"Instagram"`, `"TikTok"`). Injected into the classification prompt.
-- `handle` (str, optional): Author handle (e.g., `"@username"`, `"r/subreddit"`).
-- `hashtags` (str or list, optional): Hashtags associated with the posts.
-- `post_metadata` (dict, optional): Additional post metadata (e.g., `{"likes": 1200, "shares": 450}`).
+- `sm_source` (str, optional): Social media platform to pull posts from automatically (e.g., `"threads"`). When set, `input_data` is fetched and does not need to be provided.
+- `sm_limit` (int, default=`50`): Number of posts to fetch when using `sm_source`.
+- `sm_credentials` (dict, optional): Platform credentials (e.g., `{"access_token": "...", "user_id": "..."}`). Falls back to env vars.
+- `platform` (str, optional): Social media platform label (e.g., `"Twitter/X"`, `"Reddit"`, `"TikTok"`). Injected into the classification prompt as context.
+- `handle` (str, optional): Author handle (e.g., `"@username"`, `"r/subreddit"`). Injected into prompt.
+- `hashtags` (str or list, optional): Hashtags associated with the posts. Injected into prompt.
+- `post_metadata` (dict, optional): Additional post metadata injected into prompt (e.g., `{"avg_likes": 1200}`).
+- `description` (str): Additional context about the input data.
+- `feed_question` (str, default=`""`): Context describing what to look for in the feed. Used when `categories="auto"`. When `sm_source` is set and this is omitted, defaults to `"What topics are discussed in these social media posts?"`.
 - `user_model` (str, default=`"gpt-4o"`): Model to use
 - `mode` (str, default=`"image"`): PDF processing mode — `"image"`, `"text"`, or `"both"`
 - `creativity` (float, optional): Temperature setting (0.0–1.0)
@@ -160,14 +164,31 @@ results = cat.classify(
     api_key=api_key
 )
 
+# Pull directly from Threads — no input_data needed
+results = cat.classify(
+    sm_source="threads",
+    sm_limit=100,
+    categories=["Opinion/Commentary", "News/Information", "Humor/Satire", "Other"],
+    platform="Threads",
+    api_key=api_key
+)
+
 # With social media context injected into prompt
 results = cat.classify(
     input_data=df['post_text'],
     categories=["Misinformation", "Opinion", "Factual", "Satire"],
-    description="Posts about the 2024 election",
     platform="Twitter/X",
     hashtags=["#Election2024", "#Politics"],
     post_metadata={"avg_likes": 450, "avg_shares": 120},
+    api_key=api_key
+)
+
+# Auto-discover categories from a feed (categories="auto")
+results = cat.classify(
+    sm_source="threads",
+    sm_limit=50,
+    categories="auto",
+    feed_question="What topics and themes appear in these posts?",
     api_key=api_key
 )
 

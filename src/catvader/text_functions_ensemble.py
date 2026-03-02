@@ -213,15 +213,26 @@ def _detect_input_type(survey_input) -> str:
     # Handle list/series input
     if hasattr(survey_input, '__iter__'):
         for item in survey_input:
-            if item is not None and not pd.isna(item):
-                item_str = str(item)
-                ext = os.path.splitext(item_str)[1].lower()
-                if ext == '.pdf':
-                    return 'pdf'
-                if ext in _IMAGE_EXTENSIONS:
-                    return 'image'
-                # First non-null item is text
-                return 'text'
+            if item is None:
+                continue
+            try:
+                if pd.isna(item):
+                    continue
+            except (TypeError, ValueError):
+                pass
+            item_str = str(item).strip()
+            if not item_str:  # skip empty strings (e.g. image_url="" for text posts)
+                continue
+            # HTTP/HTTPS URLs → treat as images
+            if item_str.startswith("http://") or item_str.startswith("https://"):
+                return 'image'
+            ext = os.path.splitext(item_str)[1].lower()
+            if ext == '.pdf':
+                return 'pdf'
+            if ext in _IMAGE_EXTENSIONS:
+                return 'image'
+            # First non-empty, non-null item is text
+            return 'text'
 
     return 'text'
 
@@ -1100,8 +1111,8 @@ def _prepare_image_data(
             image_data["error"] = "Failed to encode image"
             return image_data
 
-        # Normalize extension
-        ext = ext_from_encode.lower() if ext_from_encode else os.path.splitext(image_path)[1].lower().replace('.', '')
+        # Normalize extension (strip query string before path parsing for URLs)
+        ext = ext_from_encode.lower() if ext_from_encode else os.path.splitext(str(image_path).split("?")[0])[1].lower().replace('.', '')
         if ext in ('jpg', 'jpe', 'jfif', 'pjpeg', 'pjp'):
             ext = 'jpeg'
 
@@ -1486,9 +1497,17 @@ def classify_ensemble(
         print(f"Total images to process: {len(image_files)}")
 
         # items_to_process is list of (image_path, image_label) tuples
+        def _image_label(img_path, idx):
+            """Safe label for both local paths and URLs."""
+            if img_path is None:
+                return f"image_{idx}"
+            s = str(img_path).split("?")[0]  # strip query string
+            base = os.path.splitext(os.path.basename(s))[0]
+            return base if base else f"image_{idx}"
+
         items_to_process = [
-            (img_path, os.path.splitext(os.path.basename(img_path))[0])
-            for img_path in image_files
+            (img_path, _image_label(img_path, i))
+            for i, img_path in enumerate(image_files)
         ]
 
     elif is_pdf_mode:

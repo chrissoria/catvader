@@ -1,5 +1,5 @@
 """
-Streamlit app - CatLLM Survey Response Classifier
+Streamlit app - CatVader Social Media Classifier
 Migrated from Gradio for better mobile support
 """
 
@@ -12,13 +12,13 @@ import sys
 from datetime import datetime
 import matplotlib.pyplot as plt
 
-# Import catllm
+# Import catvader
 try:
-    import catllm
-    CATLLM_AVAILABLE = True
+    import catvader
+    CATVADER_AVAILABLE = True
 except ImportError as e:
-    print(f"Warning: Could not import catllm: {e}")
-    CATLLM_AVAILABLE = False
+    print(f"Warning: Could not import catvader: {e}")
+    CATVADER_AVAILABLE = False
 
 MAX_CATEGORIES = 10
 INITIAL_CATEGORIES = 3
@@ -198,14 +198,14 @@ def calculate_total_file_size(files):
 def generate_extract_code(input_type, description, model, model_source, max_categories, mode=None):
     """Generate Python code for category extraction."""
     if input_type == "text":
-        return f'''import catllm
+        return f'''import catvader
 import pandas as pd
 
 # Load your data
 df = pd.read_csv("your_data.csv")
 
 # Extract categories from the text column
-result = catllm.extract(
+result = catvader.extract(
     input_data=df["{description}"].tolist(),
     api_key="YOUR_API_KEY",
     input_type="text",
@@ -221,10 +221,10 @@ print(result["counts_df"])
 '''
     elif input_type == "pdf":
         mode_line = f',\n    mode="{mode}"' if mode else ''
-        return f'''import catllm
+        return f'''import catvader
 
 # Extract categories from PDF documents
-result = catllm.extract(
+result = catvader.extract(
     input_data="path/to/your/pdfs/",
     api_key="YOUR_API_KEY",
     input_type="pdf",
@@ -239,10 +239,10 @@ print(result["top_categories"])
 print(result["counts_df"])
 '''
     else:  # image
-        return f'''import catllm
+        return f'''import catvader
 
 # Extract categories from images
-result = catllm.extract(
+result = catvader.extract(
     input_data="path/to/your/images/",
     api_key="YOUR_API_KEY",
     input_type="image",
@@ -282,7 +282,7 @@ df = pd.read_csv("your_data.csv")
 
     # Build extract code
     extract_code = f'''# Step 1: Extract categories from your data
-extract_result = catllm.extract(
+extract_result = catvader.extract(
     input_data={input_placeholder},
     api_key="YOUR_API_KEY",
     description="{ext['description']}",
@@ -299,7 +299,7 @@ print(f"Extracted {{len(categories)}} categories: {{categories}}")
         classify_mode_param = f',\n    mode="{cls["mode"]}"' if cls.get('mode') and ext['input_type'] == "pdf" else ''
         classify_code = f'''
 # Step 2: Classify data using extracted categories
-result = catllm.classify(
+result = catvader.classify(
     input_data={input_placeholder},
     categories=categories,
     api_key="YOUR_API_KEY",
@@ -333,14 +333,14 @@ models = [
         {models_str}
 ]
 
-result = catllm.classify(
+result = catvader.classify(
     input_data={input_placeholder},
     categories=categories,
     models=models,
     description="{cls['description']}"{classify_mode_param}{consensus_param}
 )'''
 
-    return f'''import catllm
+    return f'''import catvader
 {load_data}
 {extract_code}
 {classify_code}
@@ -376,7 +376,7 @@ df = pd.read_csv("your_data.csv")
     if classify_mode == "Single Model":
         # Single model mode
         mode_param = f',\n    mode="{mode}"' if mode and input_type == "pdf" else ''
-        return f'''import catllm
+        return f'''import catvader
 {load_data}
 # Define categories
 categories = [
@@ -384,7 +384,7 @@ categories = [
 ]
 
 # Classify data (input type is auto-detected)
-result = catllm.classify(
+result = catvader.classify(
     input_data={input_placeholder},
     categories=categories,
     api_key="YOUR_API_KEY",
@@ -422,7 +422,7 @@ result.to_csv("classified_results.csv", index=False)
         threshold_str = "majority" if consensus_threshold == 0.5 else "two-thirds" if consensus_threshold == 0.67 else "unanimous"
         consensus_param = f',\n    consensus_threshold="{threshold_str}"' if classify_mode == "Ensemble" else ''
 
-        return f'''import catllm
+        return f'''import catvader
 {load_data}
 # Define categories
 categories = [
@@ -435,7 +435,7 @@ models = [
 ]
 
 # Classify with multiple models
-result = catllm.classify(
+result = catvader.classify(
     input_data={input_placeholder},
     categories=categories,
     models=models,
@@ -450,7 +450,7 @@ result.to_csv("classified_results.csv", index=False)
 
 def generate_methodology_report_pdf(categories, model, column_name, num_rows, model_source, filename, success_rate,
                           result_df=None, processing_time=None, prompt_template=None,
-                          data_quality=None, catllm_version=None, python_version=None,
+                          data_quality=None, catvader_version=None, python_version=None,
                           task_type="assign", extracted_categories_df=None, max_categories=None,
                           input_type="text", description=None, classify_mode="Single Model",
                           models_list=None, code=None, consensus_threshold=None):
@@ -472,9 +472,9 @@ def generate_methodology_report_pdf(categories, model, column_name, num_rows, mo
     story = []
 
     if task_type == "extract_and_assign":
-        report_title = "CatLLM Extraction &amp; Classification Report"
+        report_title = "CatVader Extraction &amp; Classification Report"
     else:
-        report_title = "CatLLM Classification Report"
+        report_title = "CatVader Classification Report"
 
     story.append(Paragraph(report_title, title_style))
     story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", normal_style))
@@ -484,10 +484,10 @@ def generate_methodology_report_pdf(categories, model, column_name, num_rows, mo
 
     if task_type == "extract_and_assign":
         about_text = """This methodology report documents the automated category extraction and classification process. \
-CatLLM first discovers categories from your data using LLMs, then classifies each item into those categories."""
+CatVader first discovers categories from your data using LLMs, then classifies each item into those categories."""
     else:
         about_text = """This methodology report documents the classification process for reproducibility and transparency. \
-CatLLM restricts the prompt to a standard template that is impartial to the researcher's inclinations, ensuring \
+CatVader restricts the prompt to a standard template that is impartial to the researcher's inclinations, ensuring \
 consistent and reproducible results."""
 
     story.append(Paragraph(about_text, normal_style))
@@ -540,9 +540,9 @@ consistent and reproducible results."""
 
     story.append(Spacer(1, 30))
     story.append(Paragraph("Citation", heading_style))
-    story.append(Paragraph("If you use CatLLM in your research, please cite:", normal_style))
+    story.append(Paragraph("If you use CatVader in your research, please cite:", normal_style))
     story.append(Spacer(1, 5))
-    story.append(Paragraph("Soria, C. (2025). CatLLM: A Python package for LLM-based text classification. DOI: 10.5281/zenodo.15532316", normal_style))
+    story.append(Paragraph("Soria, C. (2025). CatVader: A Python package for LLM-based social media classification. DOI: 10.5281/zenodo.15532316", normal_style))
 
     # Summary section
     story.append(PageBreak())
@@ -626,7 +626,7 @@ consistent and reproducible results."""
     story.append(Spacer(1, 15))
     story.append(Paragraph("Version Information", heading_style))
     version_data = [
-        ["CatLLM Version", catllm_version or "unknown"],
+        ["CatVader Version", catvader_version or "unknown"],
         ["Python Version", python_version or "unknown"],
         ["Timestamp", datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
     ]
@@ -643,7 +643,7 @@ consistent and reproducible results."""
     if code:
         story.append(PageBreak())
         story.append(Paragraph("Reproducibility Code", title_style))
-        story.append(Paragraph("Use this Python code to reproduce the classification with the CatLLM package:", normal_style))
+        story.append(Paragraph("Use this Python code to reproduce the classification with the CatVader package:", normal_style))
         story.append(Spacer(1, 10))
 
         # Split code into lines and add as code-formatted paragraphs
@@ -711,8 +711,8 @@ consistent and reproducible results."""
 def run_auto_extract(input_type, input_data, description, max_categories_val,
                      model_tier, model, api_key_input, mode=None, progress_callback=None):
     """Extract categories from data."""
-    if not CATLLM_AVAILABLE:
-        return None, "catllm package not available"
+    if not CATVADER_AVAILABLE:
+        return None, "catvader package not available"
 
     actual_api_key, provider = get_api_key(model, model_tier, api_key_input)
     if not actual_api_key:
@@ -749,7 +749,7 @@ def run_auto_extract(input_type, input_data, description, max_categories_val,
         if mode:
             extract_kwargs['mode'] = mode
 
-        extract_result = catllm.extract(**extract_kwargs)
+        extract_result = catvader.extract(**extract_kwargs)
         categories = extract_result.get('top_categories', [])
 
         if not categories:
@@ -766,8 +766,8 @@ def run_classify_data(input_type, input_data, description, categories,
                       original_filename="data", column_name="text",
                       progress_callback=None):
     """Classify data with user-provided categories."""
-    if not CATLLM_AVAILABLE:
-        return None, None, None, None, "catllm package not available"
+    if not CATVADER_AVAILABLE:
+        return None, None, None, None, "catvader package not available"
 
     if not categories:
         return None, None, None, None, "Please enter at least one category"
@@ -790,7 +790,7 @@ def run_classify_data(input_type, input_data, description, categories,
         if mode:
             classify_kwargs['mode'] = mode
 
-        result = catllm.classify(**classify_kwargs)
+        result = catvader.classify(**classify_kwargs)
 
         processing_time = time.time() - start_time
         num_items = len(result)
@@ -809,9 +809,9 @@ def run_classify_data(input_type, input_data, description, categories,
 
         # Get version info
         try:
-            catllm_version = catllm.__version__
+            catvader_version = catvader.__version__
         except AttributeError:
-            catllm_version = "unknown"
+            catvader_version = "unknown"
         python_version = sys.version.split()[0]
 
         # Generate methodology report
@@ -825,7 +825,7 @@ def run_classify_data(input_type, input_data, description, categories,
             success_rate=success_rate,
             result_df=result,
             processing_time=processing_time,
-            catllm_version=catllm_version,
+            catvader_version=catvader_version,
             python_version=python_version,
             task_type="assign",
             input_type=input_type,
@@ -842,7 +842,7 @@ def run_classify_data(input_type, input_data, description, categories,
 
 
 def sanitize_model_name(model: str) -> str:
-    """Convert model name to column-safe suffix (matches catllm logic)."""
+    """Convert model name to column-safe suffix (matches catvader logic)."""
     import re
     sanitized = re.sub(r'[^a-zA-Z0-9]', '_', model)
     sanitized = re.sub(r'_+', '_', sanitized)
@@ -853,7 +853,7 @@ def sanitize_model_name(model: str) -> str:
 def _find_model_column_suffix(result_df, model_name):
     """Find the actual column suffix used for a model in the DataFrame.
 
-    catllm appends a creativity suffix (e.g. _tauto, _t50) to ensemble column
+    catvader appends a creativity suffix (e.g. _tauto, _t50) to ensemble column
     names, so we can't just use sanitize_model_name().  This function looks at
     the real DataFrame columns to discover the full suffix.
     """
@@ -934,7 +934,7 @@ def create_classification_heatmap(result_df, categories, classify_mode="Single M
     fig_width = max(8, len(categories) * 0.8)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-    # Create custom colormap: black (0) and orange (1) - CatLLM theme
+    # Create custom colormap: black (0) and orange (1) - CatVader theme
     from matplotlib.colors import ListedColormap
     cmap = ListedColormap(['#1a1a1a', '#E8A33C'])
 
@@ -1086,7 +1086,7 @@ def create_distribution_chart(result_df, categories, classify_mode="Single Model
 
 # Page config
 st.set_page_config(
-    page_title="CatLLM - Research Data Classifier",
+    page_title="CatVader - Social Media Classifier",
     page_icon="🐱",
     layout="wide"
 )
@@ -1320,11 +1320,11 @@ if 'extraction_params' not in st.session_state:
 # Logo and title - use HTML for better alignment
 st.markdown("""
 <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 10px;">
-    <img src="https://huggingface.co/spaces/CatLLM/survey-classifier/resolve/main/logo.png" width="100" style="border-radius: 8px;">
+    <img src="https://huggingface.co/spaces/CatVader/social-media-classifier/resolve/main/logo.png" width="100" style="border-radius: 8px;">
     <div>
-        <div style="font-size: 2.2rem; font-weight: 700; color: #333; font-family: 'EB Garamond', Garamond, Georgia, serif; line-height: 1.1;">CatLLM</div>
+        <div style="font-size: 2.2rem; font-weight: 700; color: #333; font-family: 'EB Garamond', Garamond, Georgia, serif; line-height: 1.1;">CatVader</div>
         <div style="font-size: 1.1rem; font-weight: 500; color: #E8A33C; font-family: 'EB Garamond', Garamond, Georgia, serif; margin-bottom: 4px;">NLP for Survey Research</div>
-        <div style="font-size: 1rem; font-weight: 400; color: #666; font-family: 'EB Garamond', Garamond, Georgia, serif;">Research-grade categorization of survey responses, PDFs, and images using AI models.</div>
+        <div style="font-size: 1rem; font-weight: 400; color: #666; font-family: 'EB Garamond', Garamond, Georgia, serif;">Research-grade classification of social media posts, PDFs, and images using AI models.</div>
         <div style="font-size: 0.85rem; font-weight: 400; color: #888; font-family: 'EB Garamond', Garamond, Georgia, serif; margin-top: 4px;">Developed at UC Berkeley</div>
     </div>
 </div>
@@ -1337,20 +1337,20 @@ with st.expander("About This App"):
 
 ---
 
-**CatLLM** is an open-source Python package for classifying text and document data using Large Language Models.
+**CatVader** is an open-source Python package for classifying and exploring social media data using Large Language Models.
 
 ### What It Does
 - **Extract Categories**: Discover themes and categories in your data automatically
 - **Assign Categories**: Classify data into your predefined categories
-- **Extract & Assign**: Let CatLLM discover categories, then classify all your data
+- **Extract & Assign**: Let CatVader discover categories, then classify all your data
 
 ### Supported Providers
 OpenAI (GPT-4o, GPT-4o Mini), Anthropic (Claude), Google (Gemini), Mistral, HuggingFace, xAI (Grok), and Perplexity. Use the free tier or bring your own API key.
 
 ### Beta Test - We Want Your Feedback!
-This app is currently in **beta** and **free to use** while CatLLM is under review for publication, made possible by **Bashir Ahmed's generous fellowship support**.
+This app is currently in **beta** and **free to use** while CatVader is under active development, made possible by **Bashir Ahmed's generous fellowship support**.
 
-- Found a bug? Have a feature request? Please open an issue on [GitHub](https://github.com/chrissoria/cat-llm)
+- Found a bug? Have a feature request? Please open an issue on [GitHub](https://github.com/chrissoria/cat-vader)
 - Reach out directly: [chrissoria@berkeley.edu](mailto:chrissoria@berkeley.edu)
 
 ### Acknowledgments
@@ -1361,13 +1361,13 @@ This app is currently in **beta** and **free to use** while CatLLM is under revi
 
 ### Links
 - **Website**: [christophersoria.com](https://christophersoria.com)
-- **PyPI**: [pip install cat-llm](https://pypi.org/project/cat-llm/)
-- **GitHub**: [github.com/chrissoria/cat-llm](https://github.com/chrissoria/cat-llm)
+- **PyPI**: [pip install cat-vader](https://pypi.org/project/cat-vader/)
+- **GitHub**: [github.com/chrissoria/cat-vader](https://github.com/chrissoria/cat-vader)
 
 ### Citation
-If you use CatLLM in your research, please cite:
+If you use CatVader in your research, please cite:
 ```
-Soria, C. (2025). CatLLM: A Python package for LLM-based text classification. DOI: 10.5281/zenodo.15532316
+Soria, C. (2025). CatVader: A Python package for LLM-based social media classification. DOI: 10.5281/zenodo.15532316
 ```
 """)
 
@@ -1378,7 +1378,7 @@ with col_input:
     # Input type selector
     input_type_choice = st.radio(
         "Input Type",
-        options=["Survey Responses", "PDF Documents", "Images"],
+        options=["Social Media Posts", "PDF Documents", "Images"],
         horizontal=True,
         key="input_type_radio"
     )
@@ -1390,7 +1390,7 @@ with col_input:
     original_filename = "data"
     pdf_mode = "Image (visual documents)"
 
-    if input_type_choice == "Survey Responses":
+    if input_type_choice == "Social Media Posts":
         input_type_selected = "text"
 
         upload_col, example_col = st.columns([3, 1])
@@ -1630,7 +1630,7 @@ with col_input:
                         extract_kwargs['focus'] = focus.strip()
 
                     try:
-                        extract_result = catllm.extract(**extract_kwargs)
+                        extract_result = catvader.extract(**extract_kwargs)
                         categories = extract_result.get('top_categories', [])
 
                         processing_time = time.time() - start_time
@@ -1918,7 +1918,7 @@ with col_input:
                             if classify_mode == "Ensemble":
                                 classify_kwargs["consensus_threshold"] = consensus_threshold
 
-                            result_df = catllm.classify(**classify_kwargs)
+                            result_df = catvader.classify(**classify_kwargs)
 
                             processing_time = time.time() - start_time
                             total_items = len(result_df)
@@ -1978,7 +1978,7 @@ with col_input:
                             if classify_mode == "Ensemble":
                                 classify_kwargs["consensus_threshold"] = consensus_threshold
 
-                            result_df = catllm.classify(**classify_kwargs)
+                            result_df = catvader.classify(**classify_kwargs)
                             all_results = [result_df]
 
                             processing_time = time.time() - start_time
@@ -2008,9 +2008,9 @@ with col_input:
 
                         # Get version info
                         try:
-                            catllm_version = catllm.__version__
+                            catvader_version = catvader.__version__
                         except AttributeError:
-                            catllm_version = "unknown"
+                            catvader_version = "unknown"
                         python_version = sys.version.split()[0]
 
                         # For reports: create model string (single or list)
@@ -2056,7 +2056,7 @@ with col_input:
                             success_rate=success_rate,
                             result_df=result_df,
                             processing_time=processing_time,
-                            catllm_version=catllm_version,
+                            catvader_version=catvader_version,
                             python_version=python_version,
                             task_type="assign",
                             input_type=input_type_selected,
@@ -2204,7 +2204,7 @@ with col_code:
 if st.session_state.get('show_code_modal'):
     st.markdown("---")
     st.markdown("### Reproducibility Code")
-    st.markdown("Use this code to reproduce the classification with the CatLLM Python package:")
+    st.markdown("Use this code to reproduce the classification with the CatVader Python package:")
 
     # Use results code if available, otherwise generate from current parameters
     if st.session_state.results:
@@ -2214,8 +2214,8 @@ if st.session_state.get('show_code_modal'):
         current_categories = [c for c in st.session_state.categories[:st.session_state.category_count] if c.strip()]
 
         # Determine current input type and description
-        input_type_map = {"Survey Responses": "text", "PDF Documents": "pdf", "Images": "image"}
-        current_input_type = input_type_map.get(st.session_state.get('input_type_radio', 'Survey Responses'), 'text')
+        input_type_map = {"Social Media Posts": "text", "PDF Documents": "pdf", "Images": "image"}
+        current_input_type = input_type_map.get(st.session_state.get('input_type_radio', 'Social Media Posts'), 'text')
         current_description = st.session_state.get('survey_column', '') or st.session_state.get('pdf_desc', '') or st.session_state.get('image_desc', '') or 'your_data'
 
         # Get current classification mode and models
@@ -2281,7 +2281,7 @@ if st.session_state.get('show_code_modal'):
                     ensemble_runs=results.get('ensemble_runs'),
                 )
         else:
-            code_to_show = '''import catllm
+            code_to_show = '''import catvader
 
 # Define your categories
 categories = [
@@ -2291,7 +2291,7 @@ categories = [
 ]
 
 # Classify your data
-result = catllm.classify(
+result = catvader.classify(
     input_data=df["your_column"].tolist(),
     categories=categories,
     api_key="YOUR_API_KEY",
