@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cat-llm"
+name = "cat-vader"
 dynamic = ["version"]
-description = 'A tool for categorizing text data and images using LLMs and vision models'
+description = 'A tool for classifying and analyzing social media data using LLMs and vision models'
 readme = "README.md"
 requires-python = ">=3.8"
 license = "GPL-3.0-or-later"
-keywords = ["llm","categorizer","survey data", "image classification", "structured output", "text classification"]
+keywords = ["llm", "social media", "text classification", "content moderation", "structured output"]
 authors = [
   { name = "Chris Soria", email = "chrissoria@berkeley.edu" },
 ]
@@ -37,44 +37,44 @@ dependencies = [
 pdf = ["PyMuPDF>=1.23.0"]
 
 [project.urls]
-Documentation = "https://github.com/chrissoria/cat-llm#readme"
-Issues = "https://github.com/chrissoria/cat-llm/issues"
-Source = "https://github.com/chrissoria/cat-llm"
+Documentation = "https://github.com/chrissoria/cat-vader#readme"
+Issues = "https://github.com/chrissoria/cat-vader/issues"
+Source = "https://github.com/chrissoria/cat-vader"
 
 [tool.hatch.version]
-path = "src/catllm/__about__.py"
+path = "src/catvader/__about__.py"
 
 [tool.hatch.envs.types]
 extra-dependencies = [
   "mypy>=1.0.0",
 ]
 [tool.hatch.envs.types.scripts]
-check = "mypy --install-types --non-interactive {args:src/catllm tests}"
+check = "mypy --install-types --non-interactive {args:src/catvader tests}"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/catllm"]  # Keep the src/ prefix for wheel
+packages = ["src/catvader"]
 include = [
-    "src/catllm/**/*.py",
-    "src/catllm/images/*",
+    "src/catvader/**/*.py",
+    "src/catvader/images/*",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/catllm/**/*.py",
-    "src/catllm/images/*",
+    "src/catvader/**/*.py",
+    "src/catvader/images/*",
 ]
 
 [tool.coverage.run]
-source_pkgs = ["catllm", "tests"]
+source_pkgs = ["catvader", "tests"]
 branch = true
 parallel = true
 omit = [
-  "src/catllm/__about__.py",
+  "src/catvader/__about__.py",
 ]
 
 [tool.coverage.paths]
-catllm = ["src/catllm", "*/cat-llm/src/catllm"]
-tests = ["tests", "*/cat-llm/tests"]
+catvader = ["src/catvader", "*/cat-vader/src/catvader"]
+tests = ["tests", "*/cat-vader/tests"]
 
 [tool.coverage.report]
 exclude_lines = [

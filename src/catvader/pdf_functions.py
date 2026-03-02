@@ -13,12 +13,6 @@ __all__ = [
     "_extract_page_text",
     "explore_pdf_categories",
 ]
-from .calls.pdf_CoVe import (
-    pdf_chain_of_verification_openai,
-    pdf_chain_of_verification_anthropic,
-    pdf_chain_of_verification_google,
-    pdf_chain_of_verification_mistral
-)
 
 
 def _anthropic_supports_pdf(model_name):
@@ -204,7 +198,6 @@ def pdf_multi_class(
     mode="image",
     creativity=None,
     safety=False,
-    chain_of_verification=False,
     chain_of_thought=True,
     step_back_prompt=False,
     context_prompt=False,
@@ -240,7 +233,6 @@ def pdf_multi_class(
             Default is "image".
         creativity (float): Temperature setting. None uses model default.
         safety (bool): If True, saves progress after each page.
-        chain_of_verification (bool): Enable Chain of Verification for accuracy.
         chain_of_thought (bool): Enable step-by-step reasoning. Default True.
         step_back_prompt (bool): Enable step-back prompting for abstract thinking.
         context_prompt (bool): Add expert context to prompts.
@@ -260,7 +252,7 @@ def pdf_multi_class(
             - processing_status: "success" or "error"
 
     Example:
-        >>> import catllm as cat
+        >>> import catvader as cat
         >>> # Image mode (default) - good for documents with charts/tables
         >>> results = cat.pdf_multi_class(
         ...     pdf_description="financial reports",
@@ -279,11 +271,11 @@ def pdf_multi_class(
         ... )
 
     .. deprecated::
-        Use :func:`catllm.classify` instead. This function will be removed in a future version.
+        Use :func:`catvader.classify` instead. This function will be removed in a future version.
     """
     warnings.warn(
         "pdf_multi_class() is deprecated and will be removed in a future version. "
-        "Use catllm.classify() instead, which auto-detects PDF input.",
+        "Use catvader.classify() instead, which auto-detects PDF input.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -355,23 +347,6 @@ def pdf_multi_class(
         examples_text = "Here are some examples of how to categorize:\n" + "\n".join(examples)
     else:
         examples_text = ""
-
-    # Helper function for CoVe
-    def remove_numbering(line):
-        line = line.strip()
-        if line.startswith('- '):
-            return line[2:].strip()
-        if line.startswith('• '):
-            return line[2:].strip()
-        if line and line[0].isdigit():
-            i = 0
-            while i < len(line) and line[i].isdigit():
-                i += 1
-            if i < len(line) and line[i] in '.':
-                return line[i+1:].strip()
-            elif i < len(line) and line[i] in ')':
-                return line[i+1:].strip()
-        return line
 
     # Step-back insight initialization
     if step_back_prompt:
@@ -450,46 +425,6 @@ Provide a brief analysis of what content cues to look for when categorizing such
 
         return base_text
 
-    def _build_cove_prompts(base_prompt_text):
-        """Build chain of verification prompts for PDF pages."""
-        step2_prompt = f"""You provided this initial categorization:
-<<INITIAL_REPLY>>
-
-Original task: {base_prompt_text}
-
-Generate a focused list of 3-5 verification questions to fact-check your categorization. Each question should:
-- Be concise and specific (one sentence)
-- Address a distinct content element or category assignment
-- Be answerable by re-examining the document page
-
-Focus on verifying:
-- Whether each category assignment matches what's visible in the page
-- Whether any content elements were missed or misinterpreted
-- Whether there are any logical inconsistencies
-
-Provide only the verification questions as a numbered list."""
-
-        step3_prompt = f"""Re-examine the attached document page and answer the following verification question.
-
-Document description: {pdf_description}
-
-Verification question: <<QUESTION>>
-
-Provide a brief, direct answer (1-2 sentences maximum) based on what you observe in the page.
-
-Answer:"""
-
-        step4_prompt = f"""Original task: {base_prompt_text}
-Initial categorization:
-<<INITIAL_REPLY>>
-Verification questions and answers:
-<<VERIFICATION_QA>>
-Based on this verification, provide the final corrected categorization.
-If no categories are present, assign "0" to all categories.
-Provide the final categorization in the same JSON format:"""
-
-        return step2_prompt, step3_prompt, step4_prompt
-
     def _build_prompt_openai_mistral(encoded_image, base_text):
         """Build prompt for OpenAI/Mistral format (PDF converted to image)."""
         encoded_image_url = f"data:image/png;base64,{encoded_image}"
@@ -534,7 +469,7 @@ Provide the final categorization in the same JSON format:"""
             "mime_type": "application/pdf"
         }
 
-    def _call_openai_compatible(prompt, step2_prompt, step3_prompt, step4_prompt, pdf_content):
+    def _call_openai_compatible(prompt, pdf_content):
         """Handle OpenAI-compatible API calls (OpenAI, Perplexity, HuggingFace, xAI).
 
         Uses direct HTTP requests instead of OpenAI SDK for lighter dependencies.
@@ -543,7 +478,7 @@ Provide the final categorization in the same JSON format:"""
 
         # Determine the base URL based on model source
         if model_source == "huggingface":
-            from catllm.text_functions import _detect_huggingface_endpoint
+            from catvader.text_functions import _detect_huggingface_endpoint
             base_url = _detect_huggingface_endpoint(api_key, user_model)
         elif model_source == "huggingface-together":
             base_url = "https://router.huggingface.co/together/v1"
@@ -585,21 +520,6 @@ Provide the final categorization in the same JSON format:"""
                 result = response.json()
                 reply = result["choices"][0]["message"]["content"]
 
-                if chain_of_verification:
-                    reply = pdf_chain_of_verification_openai(
-                        initial_reply=reply,
-                        step2_prompt=step2_prompt,
-                        step3_prompt=step3_prompt,
-                        step4_prompt=step4_prompt,
-                        client=None,  # Not used anymore - CoVe will use requests
-                        user_model=user_model,
-                        creativity=creativity,
-                        remove_numbering=remove_numbering,
-                        pdf_content=pdf_content,
-                        api_key=api_key,
-                        base_url=base_url
-                    )
-
                 return reply, None
 
             except req.exceptions.HTTPError as e:
@@ -632,7 +552,7 @@ Provide the final categorization in the same JSON format:"""
 
         return """{"1":"e"}""", "Max retries exceeded"
 
-    def _call_anthropic(prompt, step2_prompt, step3_prompt, step4_prompt, pdf_content):
+    def _call_anthropic(prompt, pdf_content):
         """Handle Anthropic API calls with native PDF support using direct HTTP requests."""
         import requests as req
 
@@ -669,20 +589,6 @@ Provide the final categorization in the same JSON format:"""
             else:
                 return """{"1":"e"}""", "No text content in response"
 
-            if chain_of_verification:
-                reply = pdf_chain_of_verification_anthropic(
-                    initial_reply=reply,
-                    step2_prompt=step2_prompt,
-                    step3_prompt=step3_prompt,
-                    step4_prompt=step4_prompt,
-                    client=None,  # No longer using SDK client
-                    user_model=user_model,
-                    creativity=creativity,
-                    remove_numbering=remove_numbering,
-                    pdf_content=pdf_content,
-                    api_key=api_key  # Pass api_key for HTTP calls
-                )
-
             return reply, None
 
         except req.exceptions.HTTPError as e:
@@ -694,7 +600,7 @@ Provide the final categorization in the same JSON format:"""
             print(f"An error occurred: {e}")
             return """{"1":"e"}""", f"Error processing input: {e}"
 
-    def _call_google(prompt_data, step2_prompt, step3_prompt, step4_prompt, base_prompt_text):
+    def _call_google(prompt_data, base_prompt_text):
         """Handle Google API calls with native PDF support."""
         import requests
 
@@ -752,22 +658,6 @@ Provide the final categorization in the same JSON format:"""
             else:
                 return "No response generated", None
 
-            if chain_of_verification:
-                reply = pdf_chain_of_verification_google(
-                    initial_reply=reply,
-                    prompt=base_prompt_text,
-                    step2_prompt=step2_prompt,
-                    step3_prompt=step3_prompt,
-                    step4_prompt=step4_prompt,
-                    url=url,
-                    headers=headers,
-                    creativity=creativity,
-                    remove_numbering=remove_numbering,
-                    make_google_request=make_google_request,
-                    pdf_data=prompt_data["pdf_data"],
-                    mime_type=prompt_data["mime_type"]
-                )
-
             return reply, None
 
         except requests.exceptions.HTTPError as e:
@@ -782,7 +672,7 @@ Provide the final categorization in the same JSON format:"""
             print(f"An error occurred: {e}")
             return """{"1":"e"}""", f"Error processing input: {e}"
 
-    def _call_mistral(prompt, step2_prompt, step3_prompt, step4_prompt, pdf_content):
+    def _call_mistral(prompt, pdf_content):
         """Handle Mistral API calls (PDF converted to image).
 
         Uses direct HTTP requests instead of Mistral SDK for lighter dependencies.
@@ -819,19 +709,6 @@ Provide the final categorization in the same JSON format:"""
                 result = response.json()
                 reply = result["choices"][0]["message"]["content"]
 
-                if chain_of_verification:
-                    reply = pdf_chain_of_verification_mistral(
-                        initial_reply=reply,
-                        step2_prompt=step2_prompt,
-                        step3_prompt=step3_prompt,
-                        step4_prompt=step4_prompt,
-                        client=None,  # Not used - CoVe will use requests
-                        user_model=user_model,
-                        creativity=creativity,
-                        remove_numbering=remove_numbering,
-                        pdf_content=pdf_content,
-                        api_key=api_key
-                    )
 
                 return reply, None
 
@@ -860,7 +737,7 @@ Provide the final categorization in the same JSON format:"""
         """Build text-only prompt for providers (no image attachment)."""
         return [{"type": "text", "text": base_text}]
 
-    def _call_openai_text_only(prompt_text, step2_prompt, step3_prompt, step4_prompt):
+    def _call_openai_text_only(prompt_text):
         """Handle OpenAI-compatible API calls with text-only prompt.
 
         Uses direct HTTP requests instead of OpenAI SDK for lighter dependencies.
@@ -869,7 +746,7 @@ Provide the final categorization in the same JSON format:"""
 
         # Determine the base URL based on model source
         if model_source == "huggingface":
-            from catllm.text_functions import _detect_huggingface_endpoint
+            from catvader.text_functions import _detect_huggingface_endpoint
             base_url = _detect_huggingface_endpoint(api_key, user_model)
         elif model_source == "huggingface-together":
             base_url = "https://router.huggingface.co/together/v1"
@@ -941,7 +818,7 @@ Provide the final categorization in the same JSON format:"""
 
         return """{"1":"e"}""", "Max retries exceeded"
 
-    def _call_anthropic_text_only(prompt_text, step2_prompt, step3_prompt, step4_prompt):
+    def _call_anthropic_text_only(prompt_text):
         """Handle Anthropic API calls with text-only prompt using direct HTTP requests."""
         import requests as req
 
@@ -986,7 +863,7 @@ Provide the final categorization in the same JSON format:"""
             print(f"An error occurred: {e}")
             return """{"1":"e"}""", f"Error processing input: {e}"
 
-    def _call_google_text_only(prompt_text, step2_prompt, step3_prompt, step4_prompt):
+    def _call_google_text_only(prompt_text):
         """Handle Google API calls with text-only prompt."""
         import requests
 
@@ -1051,7 +928,7 @@ Provide the final categorization in the same JSON format:"""
             print(f"An error occurred: {e}")
             return """{"1":"e"}""", f"Error processing input: {e}"
 
-    def _call_mistral_text_only(prompt_text, step2_prompt, step3_prompt, step4_prompt):
+    def _call_mistral_text_only(prompt_text):
         """Handle Mistral API calls with text-only prompt.
 
         Uses direct HTTP requests instead of Mistral SDK for lighter dependencies.
@@ -1124,21 +1001,16 @@ Provide the final categorization in the same JSON format:"""
         # Build prompt with text if available
         base_prompt_text = _build_base_prompt_text(page_text)
 
-        if chain_of_verification:
-            step2_prompt, step3_prompt, step4_prompt = _build_cove_prompts(base_prompt_text)
-        else:
-            step2_prompt = step3_prompt = step4_prompt = None
-
         # TEXT-ONLY MODE: No image/PDF attachment needed
         if mode == "text":
             if model_source == "anthropic":
-                return _call_anthropic_text_only(base_prompt_text, step2_prompt, step3_prompt, step4_prompt)
+                return _call_anthropic_text_only(base_prompt_text)
             elif model_source == "google":
-                return _call_google_text_only(base_prompt_text, step2_prompt, step3_prompt, step4_prompt)
+                return _call_google_text_only(base_prompt_text)
             elif model_source in ["openai", "perplexity", "huggingface", "xai"]:
-                return _call_openai_text_only(base_prompt_text, step2_prompt, step3_prompt, step4_prompt)
+                return _call_openai_text_only(base_prompt_text)
             elif model_source == "mistral":
-                return _call_mistral_text_only(base_prompt_text, step2_prompt, step3_prompt, step4_prompt)
+                return _call_mistral_text_only(base_prompt_text)
             else:
                 raise ValueError(f"Unknown source! Choose from OpenAI, Anthropic, Perplexity, Google, xAI, Huggingface, or Mistral")
 
@@ -1177,7 +1049,7 @@ Provide the final categorization in the same JSON format:"""
                         "data": encoded_image
                     }
                 }
-            return _call_anthropic(prompt, step2_prompt, step3_prompt, step4_prompt, pdf_content)
+            return _call_anthropic(prompt, pdf_content)
 
         elif model_source == "google":
             pdf_bytes, is_valid = _extract_page_as_pdf_bytes(pdf_path, page_index)
@@ -1186,7 +1058,7 @@ Provide the final categorization in the same JSON format:"""
 
             encoded_pdf = _encode_bytes_to_base64(pdf_bytes)
             prompt_data = _build_prompt_google_pdf(encoded_pdf, base_prompt_text)
-            return _call_google(prompt_data, step2_prompt, step3_prompt, step4_prompt, base_prompt_text)
+            return _call_google(prompt_data, base_prompt_text)
 
         # Handle providers requiring image conversion
         else:
@@ -1197,14 +1069,14 @@ Provide the final categorization in the same JSON format:"""
             encoded_image = _encode_bytes_to_base64(image_bytes)
             prompt = _build_prompt_openai_mistral(encoded_image, base_prompt_text)
 
-            # PDF content for CoVe (as image)
+            # PDF content for image-based API call
             encoded_image_url = f"data:image/png;base64,{encoded_image}"
             pdf_content = {"type": "image_url", "image_url": {"url": encoded_image_url, "detail": "high"}}
 
             if model_source in ["openai", "perplexity", "huggingface", "xai"]:
-                return _call_openai_compatible(prompt, step2_prompt, step3_prompt, step4_prompt, pdf_content)
+                return _call_openai_compatible(prompt, pdf_content)
             elif model_source == "mistral":
-                return _call_mistral(prompt, step2_prompt, step3_prompt, step4_prompt, pdf_content)
+                return _call_mistral(prompt, pdf_content)
             else:
                 raise ValueError(f"Unknown source! Choose from OpenAI, Anthropic, Perplexity, Google, xAI, Huggingface, or Mistral")
 
@@ -1424,7 +1296,7 @@ def explore_pdf_categories(
     if model_source in ["openai", "huggingface", "huggingface-together", "xai", "perplexity"]:
         # Determine base URL for OpenAI-compatible APIs
         if model_source == "huggingface":
-            from catllm.text_functions import _detect_huggingface_endpoint
+            from catvader.text_functions import _detect_huggingface_endpoint
             openai_base_url = _detect_huggingface_endpoint(api_key, user_model)
         elif model_source == "huggingface-together":
             openai_base_url = "https://router.huggingface.co/together/v1"

@@ -1,5 +1,5 @@
 """
-Classification functions for CatLLM.
+Classification functions for CatVader.
 
 This module provides unified classification for text, image, and PDF inputs,
 supporting both single-model and multi-model (ensemble) classification.
@@ -7,6 +7,8 @@ supporting both single-model and multi-model (ensemble) classification.
 
 import warnings
 from typing import Union, Callable
+
+from ._social_media import fetch_social_media, SUPPORTED_SOURCES
 
 __all__ = [
     # Main entry point
@@ -39,17 +41,41 @@ from .image_functions import image_multi_class
 from .pdf_functions import pdf_multi_class
 
 
+def _build_social_media_context(platform, handle, hashtags, post_metadata):
+    """Build a context block string from social media metadata fields."""
+    parts = []
+    if platform:
+        parts.append(f"Platform: {platform}")
+    if handle:
+        parts.append(f"Author: {handle}")
+    if hashtags:
+        tags = hashtags if isinstance(hashtags, str) else " ".join(hashtags)
+        parts.append(f"Hashtags: {tags}")
+    if post_metadata:
+        for k, v in post_metadata.items():
+            parts.append(f"{k.capitalize()}: {v}")
+    return "\n".join(parts)
+
+
 def classify(
-    input_data,
-    categories,
+    input_data=None,
+    categories=None,
     api_key=None,
+    # Social media source — when set, input_data is fetched automatically
+    sm_source: str = None,
+    sm_limit: int = 50,
+    sm_credentials: dict = None,
+    # Social media context fields — injected into the classification prompt
+    platform: str = None,
+    handle: str = None,
+    hashtags=None,
+    post_metadata: dict = None,
     input_type="text",
     description="",
     user_model="gpt-4o",
     mode="image",
     creativity=None,
     safety=False,
-    chain_of_verification=False,
     chain_of_thought=False,
     step_back_prompt=False,
     context_prompt=False,
@@ -100,8 +126,22 @@ def classify(
             - For text: list of text responses or pandas Series
             - For image: directory path or list of image file paths
             - For pdf: directory path or list of PDF file paths
+            - Omit when using sm_source (data is fetched automatically).
         categories (list): List of category names for classification.
         api_key (str): API key for the model provider (single-model mode).
+        platform (str): Social media platform (e.g., "Twitter/X", "Reddit", "Instagram").
+            Injected into the classification prompt as context.
+        handle (str): Post author handle (e.g., "@username", "r/subreddit").
+        hashtags (str or list): Hashtags associated with the post(s).
+        post_metadata (dict): Additional post metadata injected into the prompt
+            (e.g., {"likes": 1200, "shares": 450, "timestamp": "2024-01-01"}).
+        sm_source (str): Social media platform to pull feed data from.
+            When set, input_data is fetched automatically and engagement
+            metrics are included in the output DataFrame.
+            Supported: "threads"
+        sm_limit (int): Number of posts to fetch. Default 50.
+        sm_credentials (dict): Platform credentials. Falls back to env vars.
+            For Threads: {"access_token": "...", "user_id": "..."}
         input_type (str): DEPRECATED - input type is now auto-detected.
             Kept for backward compatibility.
         description (str): Description of the input data context.
@@ -112,7 +152,6 @@ def classify(
             - "both": Send both image and extracted text
         creativity (float): Temperature setting. None uses model default.
         safety (bool): If True, saves progress after each item.
-        chain_of_verification (bool): Enable Chain of Verification for accuracy.
         chain_of_thought (bool): Enable step-by-step reasoning. Default False.
         step_back_prompt (bool): Enable step-back prompting.
         context_prompt (bool): Add expert context to prompts.
@@ -161,7 +200,7 @@ def classify(
         pd.DataFrame: Results with classification columns.
 
     Examples:
-        >>> import catllm as cat
+        >>> import catvader as cat
         >>>
         >>> # Single model classification
         >>> results = cat.classify(
@@ -182,6 +221,30 @@ def classify(
         ...     consensus_threshold="majority",  # or "two-thirds", "unanimous", or 0.75
         ... )
     """
+    # =========================================================================
+    # Social media source — fetch feed_input automatically when sm_source set
+    # =========================================================================
+    _sm_df = None  # holds the full fetched DataFrame (text + metrics)
+    if sm_source is not None:
+        if input_data is not None:
+            raise ValueError(
+                "Pass either input_data or sm_source, not both."
+            )
+        print(f"[CatVader] Fetching feed from '{sm_source}' (limit={sm_limit})...")
+        _sm_df = fetch_social_media(sm_source, limit=sm_limit, credentials=sm_credentials)
+        input_data = _sm_df["text"].tolist()
+        print(f"[CatVader] Fetched {len(input_data)} posts.")
+    elif input_data is None:
+        raise ValueError(
+            "Provide either input_data or sm_source="
+            f"{SUPPORTED_SOURCES}."
+        )
+
+    # Prepend social media context to description if any fields provided
+    sm_context = _build_social_media_context(platform, handle, hashtags, post_metadata)
+    if sm_context:
+        description = f"{sm_context}\n{description}".strip() if description else sm_context
+
     # Build models list
     if models is None:
         # Single model mode - build models list from individual params
@@ -192,7 +255,7 @@ def classify(
         if not has_other_category(categories):
             if add_other == "prompt":
                 print(
-                    "\n[CatLLM] It looks like your categories may not include a catch-all\n"
+                    "\n[CatVader] It looks like your categories may not include a catch-all\n"
                     "  'Other' option. Adding one can improve accuracy by giving the\n"
                     "  model an outlet for ambiguous responses instead of forcing them\n"
                     "  into ill-fitting categories.\n"
@@ -211,7 +274,7 @@ def classify(
                 # add_other=True — silently add
                 categories = list(categories) + ["Other"]
                 print(
-                    f"[CatLLM] Auto-added 'Other' catch-all category. "
+                    f"[CatVader] Auto-added 'Other' catch-all category. "
                     f"Categories are now: {categories}  "
                     f"(set add_other=False to disable)"
                 )
@@ -239,7 +302,7 @@ def classify(
                     missing_ex = [r for r in lacking if not r["has_examples"]]
 
                     print(
-                        "\n[CatLLM] Category verbosity check (set check_verbosity=False to skip):"
+                        "\n[CatVader] Category verbosity check (set check_verbosity=False to skip):"
                     )
                     for r in lacking:
                         issues = []
@@ -270,22 +333,11 @@ def classify(
     # =========================================================================
     _strategy_warnings = []
 
-    if chain_of_verification:
-        _strategy_warnings.append(
-            "[CatLLM] WARNING: chain_of_verification=True is enabled.\n"
-            "  Empirical evidence shows CoVe DEGRADES accuracy by ~2 pp and\n"
-            "  sensitivity by up to 12 pp for structured classification tasks.\n"
-            "  The verification step causes models to retract correct classifications.\n"
-            "  Cost: ~4x API calls per response.\n"
-            "  This feature is provided for research purposes only — it is not\n"
-            "  recommended for improving classification accuracy."
-        )
-
     examples = [example1, example2, example3, example4, example5, example6]
     n_examples = sum(1 for ex in examples if ex is not None)
     if n_examples > 0:
         _strategy_warnings.append(
-            f"[CatLLM] NOTE: {n_examples} few-shot example(s) provided.\n"
+            f"[CatVader] NOTE: {n_examples} few-shot example(s) provided.\n"
             "  Empirical evidence shows few-shot examples DEGRADE accuracy by\n"
             "  ~1.1-1.2 pp on average. Examples encourage over-classification\n"
             "  (sensitivity up, but precision drops ~2-3 pp), amplifying false\n"
@@ -295,7 +347,7 @@ def classify(
 
     if thinking_budget and thinking_budget > 0:
         _strategy_warnings.append(
-            f"[CatLLM] NOTE: thinking_budget={thinking_budget} is enabled.\n"
+            f"[CatVader] NOTE: thinking_budget={thinking_budget} is enabled.\n"
             "  Empirical evidence shows reasoning/thinking modes produce negligible\n"
             "  accuracy gains (<1 pp) for classification tasks, while significantly\n"
             "  increasing latency, token usage, and failure rates (up to 40% timeouts\n"
@@ -305,7 +357,7 @@ def classify(
 
     if chain_of_thought:
         _strategy_warnings.append(
-            "[CatLLM] NOTE: chain_of_thought=True is enabled.\n"
+            "[CatVader] NOTE: chain_of_thought=True is enabled.\n"
             "  Empirical evidence shows CoT has no measurable effect on structured\n"
             "  classification accuracy (~0 pp change). When categories are well-defined\n"
             "  with verbose descriptions, explicit reasoning steps add no value.\n"
@@ -314,7 +366,7 @@ def classify(
 
     if step_back_prompt:
         _strategy_warnings.append(
-            "[CatLLM] NOTE: step_back_prompt=True is enabled.\n"
+            "[CatVader] NOTE: step_back_prompt=True is enabled.\n"
             "  Empirical evidence shows step-back prompting produces small, inconsistent\n"
             "  gains (+0.6 pp average) and actually degrades top-tier model performance.\n"
             "  Cost: ~2x API calls per response."
@@ -328,7 +380,7 @@ def classify(
     # Map mode to pdf_mode
     pdf_mode = mode if mode in ("image", "text", "both") else "image"
 
-    return classify_ensemble(
+    result = classify_ensemble(
         survey_input=input_data,
         categories=categories,
         models=models,
@@ -339,7 +391,6 @@ def classify(
         creativity=creativity,
         safety=safety,
         chain_of_thought=chain_of_thought,
-        chain_of_verification=chain_of_verification,
         step_back_prompt=step_back_prompt,
         context_prompt=context_prompt,
         thinking_budget=thinking_budget,
@@ -366,3 +417,12 @@ def classify(
         save_directory=save_directory,
         progress_callback=progress_callback,
     )
+
+    # Attach social media metrics to the result when sm_source was used
+    if _sm_df is not None:
+        metric_cols = [c for c in _sm_df.columns if c not in ("text",)]
+        result = result.reset_index(drop=True)
+        for col in metric_cols:
+            result[col] = _sm_df[col].values
+
+    return result

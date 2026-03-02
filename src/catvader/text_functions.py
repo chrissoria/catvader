@@ -1,5 +1,5 @@
 """
-Text classification functions for CatLLM.
+Text classification functions for CatVader.
 
 This module provides multi-class text classification using a unified HTTP-based approach
 that works with multiple LLM providers (OpenAI, Anthropic, Google, Mistral, xAI,
@@ -40,12 +40,6 @@ from .calls.stepback import (
     get_stepback_insight_anthropic,
     get_stepback_insight_google,
     get_stepback_insight_mistral
-)
-from .calls.CoVe import (
-    chain_of_verification_openai,
-    chain_of_verification_google,
-    chain_of_verification_anthropic,
-    chain_of_verification_mistral
 )
 from .calls.top_n import (
     get_openai_top_n,
@@ -201,7 +195,7 @@ def ollama_two_step_classify(
 
     Args:
         client: UnifiedLLMClient instance
-        response_text: The survey response to classify
+        response_text: The social media post to classify
         categories: List of category names
         categories_str: Pre-formatted category string
         survey_question: Optional context
@@ -212,7 +206,7 @@ def ollama_two_step_classify(
         tuple: (json_string, error_message or None)
     """
     num_categories = len(categories)
-    survey_context = f"A respondent was asked: {survey_question}." if survey_question else ""
+    survey_context = f"Posts are from: {survey_question}." if survey_question else ""
 
     # ==========================================================================
     # Step 1: Classification (natural language - focus on accuracy)
@@ -220,13 +214,13 @@ def ollama_two_step_classify(
     step1_messages = [
         {
             "role": "system",
-            "content": "You are an expert at categorizing survey responses. Focus on accurate classification."
+            "content": "You are an expert at classifying social media posts. Focus on accurate classification."
         },
         {
             "role": "user",
             "content": f"""{survey_context}
 
-Analyze this survey response and determine which categories apply:
+Analyze this social media post and determine which categories apply:
 
 Response: "{response_text}"
 
@@ -397,12 +391,12 @@ def explore_corpus(
     # Build system message
     if research_question:
         system_content = (
-            f"You are a helpful assistant that extracts categories from survey responses. "
+            f"You are a helpful assistant that extracts categories from social media posts. "
             f"The specific task is to identify {specificity} categories of responses to a survey question. "
             f"The research question is: {research_question}"
         )
     else:
-        system_content = "You are a helpful assistant that extracts categories from survey responses."
+        system_content = "You are a helpful assistant that extracts categories from social media posts."
 
     # Sample chunks
     random_chunks = []
@@ -579,12 +573,12 @@ def explore_common_categories(
     # Build system message
     if research_question:
         system_content = (
-            f"You are a helpful assistant that extracts categories from survey responses. "
+            f"You are a helpful assistant that extracts categories from social media posts. "
             f"The specific task is to identify {specificity} categories of responses to a survey question. "
             f"The research question is: {research_question}"
         )
     else:
-        system_content = "You are a helpful assistant that extracts categories from survey responses."
+        system_content = "You are a helpful assistant that extracts categories from social media posts."
 
     def make_prompt(responses_blob: str) -> str:
         focus_text = f" Focus specifically on {focus}." if focus else ""
@@ -764,7 +758,6 @@ def multi_class(
     example6: str = None,
     creativity: float = None,
     safety: bool = False,
-    chain_of_verification: bool = False,
     chain_of_thought: bool = True,
     step_back_prompt: bool = False,
     context_prompt: bool = False,
@@ -797,7 +790,6 @@ def multi_class(
         example1-6: Optional few-shot examples for classification
         creativity: Temperature setting (None for provider default)
         safety: If True, saves results incrementally during processing
-        chain_of_verification: If True, uses 4-step CoVe prompting for verification
         chain_of_thought: If True, uses step-by-step reasoning in prompt
         step_back_prompt: If True, first asks about underlying factors before classifying
         context_prompt: If True, adds expert context prefix to prompts
@@ -830,22 +822,12 @@ def multi_class(
             model="gpt-4o",
         )
 
-    Example with chain-of-verification:
-        results = multi_class(
-            survey_input=["I moved for work"],
-            categories=["Employment", "Family"],
-            api_key="your-api-key",
-            model="gpt-4o",
-            chain_of_verification=True,
-            survey_question="Why did you move?",
-        )
-
     .. deprecated::
-        Use :func:`catllm.classify` instead. This function will be removed in a future version.
+        Use :func:`catvader.classify` instead. This function will be removed in a future version.
     """
     warnings.warn(
         "multi_class() is deprecated and will be removed in a future version. "
-        "Use catllm.classify() instead, which supports single and multi-model classification.",
+        "Use catvader.classify() instead, which supports single and multi-model classification.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -881,7 +863,7 @@ def multi_class(
     )
 
     # Survey question context
-    survey_question_context = f"A respondent was asked: {survey_question}." if survey_question else ""
+    survey_question_context = f"Posts are from: {survey_question}." if survey_question else ""
 
     # Step-back insight initialization
     stepback_insight = None
@@ -987,12 +969,12 @@ def multi_class(
         """Build the classification prompt for a single response.
 
         Returns:
-            tuple: (messages list, user_prompt string for CoVe)
+            tuple: (messages list, user_prompt string)
         """
         if chain_of_thought:
             user_prompt = f"""{survey_question_context}
 
-Categorize this survey response "{response_text}" into the following categories that apply:
+Categorize this social media post "{response_text}" into the following categories that apply:
 {categories_str}
 
 Let's think step by step:
@@ -1005,14 +987,14 @@ Let's think step by step:
 Provide your answer in JSON format where the category number is the key and "1" if present, "0" if not."""
         else:
             user_prompt = f"""{survey_question_context}
-Categorize this survey response "{response_text}" into the following categories that apply:
+Categorize this social media post "{response_text}" into the following categories that apply:
 {categories_str}
 {examples_text}
 Provide your answer in JSON format where the category number is the key and "1" if present, "0" if not."""
 
         # Add context prompt prefix if enabled
         if context_prompt:
-            context = """You are an expert researcher in survey data categorization.
+            context = """You are an expert analyst in social media content classification.
 Apply multi-label classification and base decisions on explicit and implicit meanings.
 When uncertain, prioritize precision over recall.
 
@@ -1030,102 +1012,6 @@ When uncertain, prioritize precision over recall.
         messages.append({"role": "user", "content": user_prompt})
 
         return messages, user_prompt
-
-    # Build chain of verification prompts
-    def build_cove_prompts(prompt: str, response_text: str) -> tuple:
-        """Build chain of verification prompts."""
-        step2_prompt = f"""You provided this initial categorization:
-<<INITIAL_REPLY>>
-
-Original task: {prompt}
-
-Generate a focused list of 3-5 verification questions to fact-check your categorization. Each question should:
-- Be concise and specific (one sentence)
-- Address a distinct aspect of the categorization
-- Be answerable independently
-
-Focus on verifying:
-- Whether each category assignment is accurate
-- Whether the categories match the criteria in the original task
-- Whether there are any logical inconsistencies
-
-Provide only the verification questions as a numbered list."""
-
-        step3_prompt = f"""Answer the following verification question based on the survey response provided.
-
-Survey response: {response_text}
-
-Verification question: <<QUESTION>>
-
-Provide a brief, direct answer (1-2 sentences maximum).
-
-Answer:"""
-
-        step4_prompt = f"""Original task: {prompt}
-Initial categorization:
-<<INITIAL_REPLY>>
-Verification questions and answers:
-<<VERIFICATION_QA>>
-If no categories are present, assign "0" to all categories.
-Provide the final corrected categorization in the same JSON format:"""
-
-        return step2_prompt, step3_prompt, step4_prompt
-
-    def remove_numbering(line: str) -> str:
-        """Remove numbering/bullets from a line for CoVe question parsing."""
-        line = line.strip()
-        if line.startswith('- '):
-            return line[2:].strip()
-        if line.startswith('• '):
-            return line[2:].strip()
-        if line and line[0].isdigit():
-            i = 0
-            while i < len(line) and line[i].isdigit():
-                i += 1
-            if i < len(line) and line[i] in '.)':
-                return line[i+1:].strip()
-        return line
-
-    def run_chain_of_verification(initial_reply: str, step2_prompt: str, step3_prompt: str, step4_prompt: str) -> str:
-        """Run chain of verification using the unified client."""
-        # Step 2: Generate verification questions (text response, not JSON)
-        step2_filled = step2_prompt.replace("<<INITIAL_REPLY>>", initial_reply)
-        questions_reply, err = client.complete(
-            messages=[{"role": "user", "content": step2_filled}],
-            creativity=creativity,
-            force_json=False,  # Text response
-        )
-        if err:
-            return initial_reply  # Fall back to initial reply on error
-
-        # Parse questions
-        questions = [remove_numbering(line) for line in questions_reply.strip().split('\n') if line.strip()]
-
-        # Step 3: Answer each verification question (text responses)
-        qa_pairs = []
-        for question in questions[:5]:  # Limit to 5 questions
-            step3_filled = step3_prompt.replace("<<QUESTION>>", question)
-            answer_reply, err = client.complete(
-                messages=[{"role": "user", "content": step3_filled}],
-                creativity=creativity,
-                force_json=False,  # Text response
-            )
-            if not err:
-                qa_pairs.append(f"Q: {question}\nA: {answer_reply.strip()}")
-
-        verification_qa = "\n\n".join(qa_pairs)
-
-        # Step 4: Final corrected categorization (JSON response)
-        step4_filled = step4_prompt.replace("<<INITIAL_REPLY>>", initial_reply).replace("<<VERIFICATION_QA>>", verification_qa)
-        final_reply, err = client.complete(
-            messages=[{"role": "user", "content": step4_filled}],
-            json_schema=json_schema,
-            creativity=creativity,
-        )
-
-        if err:
-            return initial_reply
-        return final_reply
 
     # Process each response
     results = []
@@ -1173,11 +1059,6 @@ Provide the final corrected categorization in the same JSON format:"""
                 results.append((None, error))
                 extracted_jsons.append('{"1":"e"}')
             else:
-                # Apply chain of verification if enabled
-                if chain_of_verification and reply:
-                    step2, step3, step4 = build_cove_prompts(user_prompt, response)
-                    reply = run_chain_of_verification(reply, step2, step3, step4)
-
                 results.append((reply, None))
                 extracted_jsons.append(extract_json(reply))
 
@@ -1270,5 +1151,5 @@ Provide the final corrected categorization in the same JSON format:"""
     return df
 
 
-# Note: For the legacy implementation with chain_of_verification, step_back_prompt,
-# and other advanced features, see text_functions_old.py
+# Note: For the legacy implementation with step_back_prompt and other advanced features,
+# see text_functions_old.py

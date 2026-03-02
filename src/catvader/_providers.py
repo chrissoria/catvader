@@ -1,5 +1,5 @@
 """
-Unified LLM provider infrastructure for CatLLM.
+Unified LLM provider infrastructure for CatVader.
 
 This module provides a unified HTTP-based approach for calling multiple LLM providers
 (OpenAI, Anthropic, Google, Mistral, xAI, Perplexity, HuggingFace, and Ollama)
@@ -424,7 +424,7 @@ class UnifiedLLMClient:
                 - OpenAI: Maps to reasoning_effort (0 → "minimal", >0 → "high")
                 - Anthropic: Enables extended thinking (0 to disable, >0 to enable with min 1024)
             force_json: If True and no json_schema, still request JSON output.
-                       Set to False for text-only responses (e.g., CoVe intermediate steps)
+                       Set to False for text-only responses
             max_retries: Maximum retry attempts
             initial_delay: Initial delay for exponential backoff
 

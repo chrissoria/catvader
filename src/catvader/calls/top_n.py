@@ -20,7 +20,7 @@ def get_openai_top_n(
     """
     # Determine the base URL based on model source
     if model_source == "huggingface":
-        from catllm._providers import _detect_huggingface_endpoint
+        from catvader._providers import _detect_huggingface_endpoint
         base_url = _detect_huggingface_endpoint(api_key, user_model)
     elif model_source == "huggingface-together":
         base_url = "https://router.huggingface.co/together/v1"
@@ -41,7 +41,7 @@ def get_openai_top_n(
     # Build system message
     if research_question:
         system_content = (
-            f"You are a helpful assistant that extracts categories from survey responses. "
+            f"You are a helpful assistant that extracts categories from social media posts. "
             f"The specific task is to identify {specificity} categories of responses to a survey question. "
             f"The research question is: {research_question}"
         )
@@ -92,7 +92,7 @@ def get_anthropic_top_n(
 
     # Build system prompt
     if research_question:
-        system_content = (f"You are a helpful assistant that extracts categories from survey responses. "
+        system_content = (f"You are a helpful assistant that extracts categories from social media posts. "
                         f"The specific task is to identify {specificity} categories of responses to a survey question. "
                         f"The research question is: {research_question}")
     else:
@@ -143,7 +143,7 @@ def get_google_top_n(
     
     # Build system-like content in the prompt
     if research_question:
-        system_context = (f"You are a helpful assistant that extracts categories from survey responses. "
+        system_context = (f"You are a helpful assistant that extracts categories from social media posts. "
                         f"The specific task is to identify {specificity} categories of responses to a survey question. "
                         f"The research question is: {research_question}\n\n")
     else:
@@ -193,7 +193,7 @@ def get_mistral_top_n(
 
     # Build system prompt
     if research_question:
-        system_content = (f"You are a helpful assistant that extracts categories from survey responses. "
+        system_content = (f"You are a helpful assistant that extracts categories from social media posts. "
                         f"The specific task is to identify {specificity} categories of responses to a survey question. "
                         f"The research question is: {research_question}")
     else:

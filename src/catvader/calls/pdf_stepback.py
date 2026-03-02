@@ -1,9 +1,10 @@
-# Stepback prompting functions for various LLM providers
+# PDF-aware Stepback prompting functions for various LLM providers
+# These functions generate abstract insights about PDF document categorization tasks
 
 import requests
 
 
-def get_stepback_insight_openai(
+def get_pdf_stepback_insight_openai(
     stepback,
     api_key,
     user_model,
@@ -11,14 +12,17 @@ def get_stepback_insight_openai(
     creativity=None
 ):
     """
-    Get stepback insight from OpenAI-compatible APIs.
+    Get stepback insight for PDF categorization from OpenAI-compatible APIs.
     Supports OpenAI, Perplexity, Huggingface, and xAI.
+
+    The stepback prompt asks for abstract thinking about document categorization
+    before analyzing specific PDF pages.
 
     Uses direct HTTP requests instead of OpenAI SDK for lighter dependencies.
     """
     # Determine the base URL based on model source
     if model_source == "huggingface":
-        from catllm._providers import _detect_huggingface_endpoint
+        from catvader._providers import _detect_huggingface_endpoint
         base_url = _detect_huggingface_endpoint(api_key, user_model)
     elif model_source == "huggingface-together":
         base_url = "https://router.huggingface.co/together/v1"
@@ -56,7 +60,7 @@ def get_stepback_insight_openai(
         return None, False
 
 
-def get_stepback_insight_anthropic(
+def get_pdf_stepback_insight_anthropic(
     stepback,
     api_key,
     user_model,
@@ -64,7 +68,7 @@ def get_stepback_insight_anthropic(
     creativity=None
 ):
     """
-    Get stepback insight from Anthropic Claude.
+    Get stepback insight for PDF categorization from Anthropic Claude.
 
     Uses direct HTTP requests instead of Anthropic SDK for lighter dependencies.
     """
@@ -104,7 +108,7 @@ def get_stepback_insight_anthropic(
         return None, False
 
 
-def get_stepback_insight_google(
+def get_pdf_stepback_insight_google(
     stepback,
     api_key,
     user_model,
@@ -112,38 +116,38 @@ def get_stepback_insight_google(
     creativity=None
 ):
     """
-    Get stepback insight from Google Gemini.
+    Get stepback insight for PDF categorization from Google Gemini.
     """
     import requests
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{user_model}:generateContent?key={api_key}"
-    
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{user_model}:generateContent"
+
     headers = {
+        "x-goog-api-key": api_key,
         "Content-Type": "application/json"
     }
-    
+
     payload = {
         "contents": [{
-            "parts": [{"text": stepback}],
-
-            **({"generationConfig": {"temperature": creativity}} if creativity is not None else {})
-        }]
+            "parts": [{"text": stepback}]
+        }],
+        **({"generationConfig": {"temperature": creativity}} if creativity is not None else {})
     }
-    
+
     try:
         response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()  # Raise error for bad status codes
-        
+        response.raise_for_status()
+
         result = response.json()
         stepback_insight = result['candidates'][0]['content']['parts'][0]['text']
-        
+
         return stepback_insight, True
-        
+
     except Exception as e:
         return None, False
 
 
-def get_stepback_insight_mistral(
+def get_pdf_stepback_insight_mistral(
     stepback,
     api_key,
     user_model,
@@ -151,7 +155,7 @@ def get_stepback_insight_mistral(
     creativity=None
 ):
     """
-    Get stepback insight from Mistral AI.
+    Get stepback insight for PDF categorization from Mistral AI.
     """
     import requests
 
@@ -178,3 +182,29 @@ def get_stepback_insight_mistral(
 
     except Exception as e:
         return None, False
+
+
+def get_pdf_stepback_insight(model_source, stepback, api_key, user_model, creativity):
+    """Get step-back insight using the appropriate provider for PDF tasks."""
+    stepback_functions = {
+        "openai": get_pdf_stepback_insight_openai,
+        "perplexity": get_pdf_stepback_insight_openai,
+        "huggingface": get_pdf_stepback_insight_openai,
+        "huggingface-together": get_pdf_stepback_insight_openai,
+        "xai": get_pdf_stepback_insight_openai,
+        "anthropic": get_pdf_stepback_insight_anthropic,
+        "google": get_pdf_stepback_insight_google,
+        "mistral": get_pdf_stepback_insight_mistral,
+    }
+
+    func = stepback_functions.get(model_source)
+    if func is None:
+        return None, False
+
+    return func(
+        stepback=stepback,
+        api_key=api_key,
+        user_model=user_model,
+        model_source=model_source,
+        creativity=creativity
+    )

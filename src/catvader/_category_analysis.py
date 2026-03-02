@@ -1,5 +1,5 @@
 """
-Category analysis utilities for CatLLM.
+Category analysis utilities for CatVader.
 
 Provides functions for analyzing user-provided category lists,
 such as detecting whether an "Other" catch-all category exists.

@@ -19,7 +19,6 @@ from .__about__ import (
 from .extract import extract
 from .explore import explore
 from .classify import classify
-from .summarize import summarize
 
 # Category analysis
 from ._category_analysis import has_other_category, check_category_verbosity
@@ -41,7 +40,7 @@ from ._providers import (
 # =============================================================================
 # Backward compatibility - Deprecated functions
 # These are kept for backward compatibility but users should migrate to the
-# new unified API (extract, classify, summarize)
+# new unified API (extract, classify)
 # =============================================================================
 
 # Extraction functions (use extract() instead)
@@ -59,14 +58,6 @@ from .classify import (
     image_multi_class,
     pdf_multi_class,
 )
-
-# Summarization functions (use summarize() instead)
-from .summarize import summarize_ensemble
-
-# =============================================================================
-# Domain-specific functions
-# =============================================================================
-from .CERAD_functions import *
 
 # =============================================================================
 # Additional utilities from existing modules (backward compatibility)
@@ -88,7 +79,6 @@ __all__ = [
     "extract",
     "explore",
     "classify",
-    "summarize",
     # Category analysis
     "has_other_category",
     "check_category_verbosity",
@@ -101,15 +91,12 @@ __all__ = [
     "check_ollama_model",
     "pull_ollama_model",
     "PROVIDER_CONFIG",
-    # Domain-specific
-    "cerad_drawn_score",
     # Deprecated (backward compatibility)
     "explore_common_categories",
     "explore_corpus",
     "explore_image_categories",
     "explore_pdf_categories",
     "classify_ensemble",
-    "summarize_ensemble",
     "multi_class",
     "image_multi_class",
     "pdf_multi_class",

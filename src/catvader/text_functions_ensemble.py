@@ -1,5 +1,5 @@
 """
-Ensemble text classification functions for CatLLM.
+Ensemble text classification functions for CatVader.
 
 This module provides multi-model ensemble classification using parallel execution.
 Multiple LLM models are called simultaneously and results are combined using
@@ -25,21 +25,9 @@ Main Function:
     - multi_class_ensemble(): Main entry point
         - Supports single model (returns DataFrame) or multiple models (returns dict)
         - Supports categories="auto" for auto-detection
-
-Chain of Verification (CoVe):
-============================
-CoVe is a 4-step prompting strategy to improve classification accuracy:
-    Step 1: Initial classification (existing classify_single)
-    Step 2: Generate verification questions about the classification
-    Step 3: Answer each verification question (up to 5 questions)
-    Step 4: Final corrected classification based on Q&A
-
-Usage: Set chain_of_verification=True in multi_class_ensemble()
-Note: CoVe requires ~4x API calls per response. Not recommended for ensemble mode
-      due to cost, but supported for single-model usage.
 """
 
-__all__ = ["classify_ensemble", "multi_class_ensemble", "summarize_ensemble"]
+__all__ = ["classify_ensemble", "multi_class_ensemble"]
 
 import json
 import os
@@ -609,180 +597,6 @@ def prepare_json_schemas(
     return json_schemas
 
 
-# =============================================================================
-# Chain of Verification (CoVe) Functions
-# =============================================================================
-
-def build_cove_prompts(original_task: str, response_text: str) -> tuple:
-    """
-    Build Chain of Verification prompts for the 4-step verification process.
-
-    Args:
-        original_task: The original classification prompt/task
-        response_text: The survey response being classified
-
-    Returns:
-        Tuple of (step2_prompt, step3_prompt, step4_prompt)
-    """
-    step2_prompt = """You provided this initial categorization:
-<<INITIAL_REPLY>>
-
-Original task: {original_task}
-
-Generate a focused list of 3-5 verification questions to fact-check your categorization. Each question should:
-- Be concise and specific (one sentence)
-- Address a distinct aspect of the categorization
-- Be answerable independently
-
-Focus on verifying:
-- Whether each category assignment is accurate
-- Whether the categories match the criteria in the original task
-- Whether there are any logical inconsistencies
-
-Provide only the verification questions as a numbered list.""".format(original_task=original_task)
-
-    step3_prompt = """Answer the following verification question based on the survey response provided.
-
-Survey response: {response_text}
-
-Verification question: <<QUESTION>>
-
-Provide a brief, direct answer (1-2 sentences maximum).
-
-Answer:""".format(response_text=response_text)
-
-    step4_prompt = """Original task: {original_task}
-Initial categorization:
-<<INITIAL_REPLY>>
-Verification questions and answers:
-<<VERIFICATION_QA>>
-If no categories are present, assign "0" to all categories.
-Provide the final corrected categorization in the same JSON format:""".format(original_task=original_task)
-
-    return step2_prompt, step3_prompt, step4_prompt
-
-
-def _remove_numbering(line: str) -> str:
-    """
-    Remove numbering/bullets from a line for CoVe question parsing.
-
-    Handles formats like:
-    - "1. Question"
-    - "1) Question"
-    - "- Question"
-    - "• Question"
-    """
-    line = line.strip()
-    if line.startswith('- '):
-        return line[2:].strip()
-    if line.startswith('• '):
-        return line[2:].strip()
-    if line and line[0].isdigit():
-        i = 0
-        while i < len(line) and line[i].isdigit():
-            i += 1
-        if i < len(line) and line[i] in '.)':
-            return line[i+1:].strip()
-    return line
-
-
-def run_chain_of_verification(
-    client,
-    initial_reply: str,
-    step2_prompt: str,
-    step3_prompt: str,
-    step4_prompt: str,
-    json_schema: dict,
-    creativity: float = None,
-    max_retries: int = 5,
-) -> str:
-    """
-    Run the Chain of Verification process.
-
-    This is a 4-step process:
-    1. Initial classification (already done, passed as initial_reply)
-    2. Generate verification questions
-    3. Answer each verification question
-    4. Final corrected classification
-
-    Args:
-        client: UnifiedLLMClient instance
-        initial_reply: The initial JSON classification result
-        step2_prompt: Prompt template for generating questions
-        step3_prompt: Prompt template for answering questions
-        step4_prompt: Prompt template for final classification
-        json_schema: JSON schema for the final classification
-        creativity: Temperature setting
-        max_retries: Maximum retry attempts for each API call
-
-    Returns:
-        Final corrected JSON classification string
-    """
-    # Step 2: Generate verification questions (text response, not JSON)
-    step2_filled = step2_prompt.replace("<<INITIAL_REPLY>>", initial_reply)
-    questions_reply, err = client.complete(
-        messages=[{"role": "user", "content": step2_filled}],
-        creativity=creativity,
-        force_json=False,  # Text response
-        max_retries=max_retries,
-    )
-    if err:
-        return initial_reply  # Fall back to initial reply on error
-
-    # Parse questions
-    questions = [
-        _remove_numbering(line)
-        for line in questions_reply.strip().split('\n')
-        if line.strip()
-    ]
-
-    # Step 3: Answer each verification question (text responses)
-    qa_pairs = []
-    for question in questions[:5]:  # Limit to 5 questions
-        step3_filled = step3_prompt.replace("<<QUESTION>>", question)
-        answer_reply, err = client.complete(
-            messages=[{"role": "user", "content": step3_filled}],
-            creativity=creativity,
-            force_json=False,  # Text response
-            max_retries=max_retries,
-        )
-        if not err:
-            qa_pairs.append(f"Q: {question}\nA: {answer_reply.strip()}")
-
-    verification_qa = "\n\n".join(qa_pairs)
-
-    # Step 4: Final corrected categorization (JSON response)
-    step4_filled = step4_prompt.replace(
-        "<<INITIAL_REPLY>>", initial_reply
-    ).replace(
-        "<<VERIFICATION_QA>>", verification_qa
-    )
-    final_reply, err = client.complete(
-        messages=[{"role": "user", "content": step4_filled}],
-        json_schema=json_schema,
-        creativity=creativity,
-        max_retries=max_retries,
-    )
-
-    if err:
-        return initial_reply
-
-    # Extract and validate JSON from the response (critical for providers
-    # like HuggingFace that use json_object mode instead of strict json_schema)
-    extracted = extract_json(final_reply)
-    try:
-        parsed = json.loads(extracted)
-        # Verify it has at least one valid key
-        if parsed and any(v in ("0", "1") for v in parsed.values()):
-            return extracted
-    except (json.JSONDecodeError, AttributeError):
-        pass
-
-    # Fall back to initial reply if extraction/validation fails
-    return initial_reply
-
-
-# =============================================================================
 # Text-Specific Functions (swap these for image classification)
 # =============================================================================
 
@@ -820,11 +634,11 @@ def build_text_classification_prompt(
     if chain_of_thought:
         user_prompt = f"""{survey_question_context}
 
-Categorize this survey response "{response_text}" into the following categories that apply:
+Categorize this social media post "{response_text}" into the following categories that apply:
 {categories_str}
 
 Let's think step by step:
-1. First, identify the main themes mentioned in the response
+1. First, identify the main themes mentioned in the post
 2. Then, match each theme to the relevant categories
 3. Finally, assign 1 to matching categories and 0 to non-matching categories
 
@@ -833,14 +647,14 @@ Let's think step by step:
 Provide your answer in JSON format where the category number is the key and "1" if present, "0" if not."""
     else:
         user_prompt = f"""{survey_question_context}
-Categorize this survey response "{response_text}" into the following categories that apply:
+Categorize this social media post "{response_text}" into the following categories that apply:
 {categories_str}
 {examples_text}
 Provide your answer in JSON format where the category number is the key and "1" if present, "0" if not."""
 
     # Add context prompt prefix if enabled
     if context_prompt:
-        context = """You are an expert researcher in survey data categorization.
+        context = """You are an expert analyst in social media content classification.
 Apply multi-label classification and base decisions on explicit and implicit meanings.
 When uncertain, prioritize precision over recall.
 
@@ -889,282 +703,6 @@ def build_summary_json_schema(include_additional_properties: bool = True) -> dic
     if include_additional_properties:
         schema["additionalProperties"] = False
     return schema
-
-
-def build_text_summarization_prompt(
-    response_text: str,
-    input_description: str = "",
-    summary_instructions: str = "",
-    max_length: int = None,
-    focus: str = None,
-    chain_of_thought: bool = True,
-    context_prompt: bool = False,
-    step_back_prompt: bool = False,
-    stepback_insights: dict = None,
-    model_name: str = None,
-) -> list:
-    """
-    Build the summarization prompt for a text input.
-
-    Args:
-        response_text: The text to summarize
-        input_description: Description of what the text contains
-        summary_instructions: Specific instructions (e.g., "bullet points", "one sentence")
-        max_length: Maximum summary length in words
-        focus: What to focus on (e.g., "main arguments", "emotional content")
-        chain_of_thought: Whether to use step-by-step reasoning
-        context_prompt: Whether to add expert context prefix
-        step_back_prompt: Whether step-back prompting is enabled
-        stepback_insights: Dict of step-back insights per model
-        model_name: Current model name (for step-back lookup)
-
-    Returns:
-        List of message dicts for the LLM
-    """
-    # Build focus instruction if provided
-    focus_instruction = ""
-    if focus:
-        focus_instruction = f", focusing on {focus}"
-
-    # Build description context if provided
-    description_context = ""
-    if input_description:
-        description_context = f"The following text is: {input_description}\n\n"
-
-    # Build length instruction if provided
-    length_instruction = ""
-    if max_length:
-        length_instruction = f"\n\nKeep the summary under {max_length} words."
-
-    # Build custom instructions if provided
-    custom_instructions = ""
-    if summary_instructions:
-        custom_instructions = f"\n\nAdditional instructions: {summary_instructions}"
-
-    if chain_of_thought:
-        user_prompt = f"""{description_context}Summarize the following text{focus_instruction}:
-
-"{response_text}"
-
-Let's think step by step:
-1. First, identify the main topic or theme
-2. Then, extract the key points
-3. Finally, synthesize into a concise summary{length_instruction}{custom_instructions}
-
-Provide your answer in JSON format: {{"summary": "your summary here"}}"""
-    else:
-        user_prompt = f"""{description_context}Summarize the following text{focus_instruction}:
-
-"{response_text}"{length_instruction}{custom_instructions}
-
-Provide your answer in JSON format: {{"summary": "your summary here"}}"""
-
-    # Add context prompt prefix if enabled
-    if context_prompt:
-        context = """You are an expert at synthesizing key insights from text.
-Focus on accuracy, clarity, and identifying the most important themes.
-Provide concise summaries that capture essential information.
-
-"""
-        user_prompt = context + user_prompt
-
-    # Build messages list
-    messages = []
-
-    # Add step-back insight if available for this model
-    if step_back_prompt and stepback_insights and model_name in stepback_insights:
-        sb_question, sb_insight = stepback_insights[model_name]
-        messages.append({"role": "user", "content": sb_question})
-        messages.append({"role": "assistant", "content": sb_insight})
-
-    messages.append({"role": "user", "content": user_prompt})
-
-    return messages
-
-
-def extract_summary_from_json(json_str: str) -> tuple:
-    """
-    Extract summary from JSON response.
-
-    Args:
-        json_str: JSON string containing {"summary": "..."}
-
-    Returns:
-        Tuple of (is_valid, summary_text or None)
-    """
-    try:
-        data = json.loads(json_str)
-        if isinstance(data, dict) and "summary" in data:
-            summary = data["summary"]
-            if isinstance(summary, str) and summary.strip():
-                return True, summary.strip()
-        return False, None
-    except (json.JSONDecodeError, TypeError):
-        return False, None
-
-
-def build_pdf_summarization_prompt(
-    page_data: dict,
-    input_description: str = "",
-    summary_instructions: str = "",
-    max_length: int = None,
-    focus: str = None,
-    provider: str = "openai",
-    pdf_mode: str = "image",
-    chain_of_thought: bool = True,
-    context_prompt: bool = False,
-    step_back_prompt: bool = False,
-    stepback_insights: dict = None,
-    model_name: str = None,
-) -> list:
-    """
-    Build the summarization prompt for a PDF page.
-
-    This is the PDF-specific prompt builder, parallel to build_pdf_classification_prompt()
-    but for summarization instead of classification.
-
-    Args:
-        page_data: Dict containing:
-            - pdf_path: Path to source PDF
-            - page_index: Page number (0-indexed)
-            - page_label: Label like "document_p1"
-            - image_bytes: PNG bytes (for image mode)
-            - pdf_bytes: PDF bytes (for native PDF providers)
-            - text: Extracted text (for text mode)
-        input_description: Description of what the PDF documents contain
-        summary_instructions: Specific instructions (e.g., "bullet points")
-        max_length: Maximum summary length in words
-        focus: What to focus on in the summary
-        provider: Provider name for format-specific handling
-        pdf_mode: "image", "text", or "both"
-        chain_of_thought: Whether to use step-by-step reasoning
-        context_prompt: Whether to add expert context prefix
-        step_back_prompt: Whether step-back prompting is enabled
-        stepback_insights: Dict of step-back insights per model
-        model_name: Current model name (for step-back lookup)
-
-    Returns:
-        List of message content parts for the LLM (format varies by provider)
-    """
-    # Build focus instruction if provided
-    focus_instruction = ""
-    if focus:
-        focus_instruction = f", focusing on {focus}"
-
-    # Build examine instruction based on mode
-    if pdf_mode == "text":
-        examine_instruction = "Examine the following text extracted from a PDF page"
-    elif pdf_mode == "both":
-        examine_instruction = "Examine the attached PDF page AND the extracted text below"
-    else:  # image mode
-        examine_instruction = "Examine the attached PDF page"
-
-    # Build length instruction if provided
-    length_instruction = ""
-    if max_length:
-        length_instruction = f"\n\nKeep the summary under {max_length} words."
-
-    # Build custom instructions if provided
-    custom_instructions = ""
-    if summary_instructions:
-        custom_instructions = f"\n\nAdditional instructions: {summary_instructions}"
-
-    if chain_of_thought:
-        base_text = f"""You are a document summarization assistant.
-Task: {examine_instruction} and provide a concise summary{focus_instruction}.
-
-{f'Document context: {input_description}' if input_description else ''}
-
-Let's analyze step by step:
-1. First, identify the main topic or theme of this page
-2. Then, extract the key points and important information
-3. Finally, synthesize into a concise summary{length_instruction}{custom_instructions}
-
-Provide your answer in JSON format: {{"summary": "your summary here"}}"""
-    else:
-        base_text = f"""You are a document summarization assistant.
-Task: {examine_instruction} and provide a concise summary{focus_instruction}.
-
-{f'Document context: {input_description}' if input_description else ''}{length_instruction}{custom_instructions}
-
-Provide your answer in JSON format: {{"summary": "your summary here"}}"""
-
-    # Add extracted text for text and both modes
-    if page_data.get("text") and pdf_mode in ("text", "both"):
-        base_text += f"\n\n--- EXTRACTED TEXT FROM PAGE ---\n{page_data['text']}\n--- END OF EXTRACTED TEXT ---"
-
-    # Add context prompt prefix if enabled
-    if context_prompt:
-        context = """You are an expert at synthesizing key insights from documents.
-Focus on accuracy, clarity, and identifying the most important themes.
-Provide concise summaries that capture essential information.
-
-"""
-        base_text = context + base_text
-
-    # Build messages based on provider and mode
-    messages = []
-
-    # Add step-back insight if available
-    if step_back_prompt and stepback_insights and model_name in stepback_insights:
-        sb_question, sb_insight = stepback_insights[model_name]
-        messages.append({"role": "user", "content": sb_question})
-        messages.append({"role": "assistant", "content": sb_insight})
-
-    # TEXT-ONLY MODE: No image/PDF attachment
-    if pdf_mode == "text":
-        messages.append({"role": "user", "content": base_text})
-        return messages
-
-    # IMAGE/BOTH MODE: Include visual content
-    # Format depends on provider
-
-    if provider in _NATIVE_PDF_PROVIDERS and page_data.get("pdf_bytes"):
-        # Anthropic or Google with native PDF
-        encoded_pdf = _encode_bytes_to_base64(page_data["pdf_bytes"])
-
-        if provider == "anthropic":
-            content = [
-                {"type": "text", "text": base_text},
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": encoded_pdf
-                    }
-                }
-            ]
-            messages.append({"role": "user", "content": content})
-
-        elif provider == "google":
-            # Google uses a special format
-            content = [
-                {"type": "text", "text": base_text},
-                {
-                    "type": "inline_data",
-                    "mime_type": "application/pdf",
-                    "data": encoded_pdf
-                }
-            ]
-            messages.append({"role": "user", "content": content})
-
-    elif page_data.get("image_bytes"):
-        # Providers requiring image conversion (OpenAI, Mistral, xAI, etc.)
-        encoded_image = _encode_bytes_to_base64(page_data["image_bytes"])
-        encoded_image_url = f"data:image/png;base64,{encoded_image}"
-
-        content = [
-            {"type": "text", "text": base_text},
-            {"type": "image_url", "image_url": {"url": encoded_image_url, "detail": "high"}}
-        ]
-        messages.append({"role": "user", "content": content})
-
-    else:
-        # Fallback to text-only if no visual data available
-        messages.append({"role": "user", "content": base_text})
-
-    return messages
 
 
 # =============================================================================
@@ -1689,7 +1227,6 @@ def classify_ensemble(
     example6: str = None,
     creativity: float = None,
     chain_of_thought: bool = True,
-    chain_of_verification: bool = False,
     step_back_prompt: bool = False,
     context_prompt: bool = False,
     thinking_budget: int = 0,
@@ -1753,8 +1290,6 @@ def classify_ensemble(
         example1-6: Optional few-shot examples for classification
         creativity: Temperature setting (None for provider default)
         chain_of_thought: If True, uses step-by-step reasoning in prompt
-        chain_of_verification: If True, uses 4-step verification to improve accuracy
-            (Note: ~4x API calls per response - expensive for ensemble mode)
         step_back_prompt: If True, first asks about underlying factors before classifying
         context_prompt: If True, adds expert context prefix to prompts
         thinking_budget: Token budget for Google's extended thinking (0 to disable)
@@ -1994,13 +1529,6 @@ def classify_ensemble(
     effective_workers = max_workers or min(len(models), 8)
     print(f"\nParallel workers: {effective_workers}")
 
-    # Warn about CoVe cost with ensemble
-    if chain_of_verification:
-        print("\n[Chain of Verification enabled]")
-        print("  - ~4x API calls per response per model")
-        if len(models) > 1:
-            print("  - WARNING: CoVe with ensemble is expensive. Consider single-model mode.")
-
     # Build shared prompt components
     categories_str = "\n".join(f"{i + 1}. {cat}" for i, cat in enumerate(categories))
 
@@ -2009,7 +1537,7 @@ def classify_ensemble(
         f"Example {i}: {ex}" for i, ex in enumerate(examples, 1) if ex is not None
     )
 
-    survey_question_context = f"A respondent was asked: {survey_question}." if survey_question else ""
+    survey_question_context = f"Posts are from: {survey_question}." if survey_question else ""
 
     # Print categories
     print(f"\nCategories to classify ({len(categories)} total):")
@@ -2024,14 +1552,6 @@ def classify_ensemble(
 
     # Build JSON schemas per provider
     json_schemas = prepare_json_schemas(model_configs, categories, use_json_schema)
-
-    # Build original task prompt for CoVe (if enabled)
-    cove_original_task = ""
-    if chain_of_verification:
-        cove_original_task = f"""{survey_question_context}
-Categorize survey responses into the following categories:
-{categories_str}
-Provide your answer in JSON format where the category number is the key and "1" if present, "0" if not."""
 
     # Classification function for single model + single item (text, PDF page, or image)
     def classify_single(cfg: dict, item) -> tuple:
@@ -2135,9 +1655,6 @@ Provide your answer in JSON format where the category number is the key and "1" 
                 else:
                     json_result = extract_json(reply)
 
-                # Note: CoVe for PDF mode is not yet implemented
-                # (would require re-attaching PDF/image to verification prompts)
-
             # =================================================================
             # IMAGE MODE: Build image-specific prompt
             # =================================================================
@@ -2190,8 +1707,6 @@ Provide your answer in JSON format where the category number is the key and "1" 
                 else:
                     json_result = extract_json(reply)
 
-                # Note: CoVe for image mode is not yet implemented
-
             # =================================================================
             # TEXT MODE: Original text classification logic
             # =================================================================
@@ -2208,7 +1723,6 @@ Provide your answer in JSON format where the category number is the key and "1" 
                         creativity=effective_creativity,
                         max_retries=max_retries,
                     )
-                    # CoVe not supported for Ollama two-step (already has verification)
                 else:
                     messages = build_text_classification_prompt(
                         response_text=response_text,
@@ -2232,22 +1746,6 @@ Provide your answer in JSON format where the category number is the key and "1" 
                         json_result = '{"1":"e"}'
                     else:
                         json_result = extract_json(reply)
-
-                        # Run Chain of Verification if enabled
-                        if chain_of_verification and not error:
-                            step2, step3, step4 = build_cove_prompts(
-                                cove_original_task, response_text
-                            )
-                            json_result = run_chain_of_verification(
-                                client=client,
-                                initial_reply=json_result,
-                                step2_prompt=step2,
-                                step3_prompt=step3,
-                                step4_prompt=step4,
-                                json_schema=json_schemas[cfg["model"]],
-                                creativity=effective_creativity,
-                                max_retries=max_retries,
-                            )
 
             return (cfg["sanitized_name"], json_result, error)
 
@@ -2789,539 +2287,3 @@ def build_output_dataframes(
 # Backward compatibility alias
 multi_class_ensemble = classify_ensemble
 
-
-# =============================================================================
-# Summarization Ensemble Function
-# =============================================================================
-
-def summarize_ensemble(
-    survey_input,
-    api_key: str = None,
-    input_description: str = "",
-    summary_instructions: str = "",
-    max_length: int = None,
-    focus: str = None,
-    user_model: str = "gpt-4o",
-    model_source: str = "auto",
-    pdf_mode: str = "image",
-    pdf_dpi: int = 150,
-    creativity: float = None,
-    chain_of_thought: bool = True,
-    context_prompt: bool = False,
-    step_back_prompt: bool = False,
-    max_retries: int = 5,
-    batch_retries: int = 2,
-    retry_delay: float = 1.0,
-    safety: bool = False,
-    filename: str = None,
-    save_directory: str = None,
-    progress_callback: Optional[Callable] = None,
-    # Multi-model parameters
-    models: list = None,
-) -> pd.DataFrame:
-    """
-    Summarize text or PDF inputs using LLMs with optional multi-model ensemble.
-
-    Supports single-model and multi-model modes. In multi-model mode,
-    summaries from all models are collected and synthesized into a consensus
-    summary using an LLM. Input type is auto-detected from the data.
-
-    Args:
-        survey_input: Data to summarize. Can be:
-            - Text: list of strings, pandas Series, or single string
-            - PDF: directory path, single PDF path, or list of PDF paths
-        api_key: API key for single-model mode
-        input_description: Description of what the content contains (provides context)
-        summary_instructions: Specific summarization instructions (e.g., "bullet points")
-        max_length: Maximum summary length in words
-        focus: What to focus on (e.g., "main arguments", "emotional content")
-        user_model: Model to use (default "gpt-4o")
-        model_source: Provider - "auto", "openai", "anthropic", "google", etc.
-        pdf_mode: PDF processing mode (only used for PDF input):
-            - "image" (default): Render pages as images
-            - "text": Extract text only
-            - "both": Send both image and extracted text
-        pdf_dpi: DPI for PDF page rendering (default 150)
-        creativity: Temperature setting (None uses provider default)
-        chain_of_thought: Enable step-by-step reasoning (default True)
-        context_prompt: Add expert context prefix
-        step_back_prompt: Enable step-back prompting
-        max_retries: Max retries per API call
-        batch_retries: Number of batch retry passes for failed items
-        retry_delay: Delay between retries in seconds
-        safety: Save progress after each item
-        filename: Output CSV filename
-        save_directory: Directory to save results
-        progress_callback: Optional callback for progress updates
-        models: For multi-model mode, list of (model, provider, api_key) tuples
-
-    Returns:
-        DataFrame with columns:
-        - survey_input: Original text or page label (for PDFs)
-        - summary: Generated summary (or consensus summary for multi-model)
-        - summary_<model>: Per-model summaries (multi-model only)
-        - processing_status: "success", "error", "skipped"
-        - failed_models: Comma-separated list (multi-model only)
-        - pdf_path: Path to source PDF (PDF mode only)
-        - page_index: Page number, 0-indexed (PDF mode only)
-
-    Examples:
-        >>> import catllm as cat
-        >>>
-        >>> # Single model text summarization
-        >>> results = cat.summarize(
-        ...     input_data=df['responses'],
-        ...     description="Customer feedback",
-        ...     api_key=api_key
-        ... )
-        >>>
-        >>> # PDF summarization (auto-detected)
-        >>> results = cat.summarize(
-        ...     input_data="/path/to/pdfs/",
-        ...     description="Research papers",
-        ...     mode="image",
-        ...     api_key=api_key
-        ... )
-        >>>
-        >>> # Multi-model with synthesis
-        >>> results = cat.summarize(
-        ...     input_data=df['responses'],
-        ...     models=[
-        ...         ("gpt-4o", "openai", "sk-..."),
-        ...         ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-..."),
-        ...     ],
-        ... )
-    """
-    # Detect input type: Text vs PDF
-    input_type = _detect_input_type(survey_input)
-    is_pdf_mode = (input_type == 'pdf')
-
-    if is_pdf_mode:
-        # Validate pdf_mode parameter
-        pdf_mode = pdf_mode.lower()
-        if pdf_mode not in {"image", "text", "both"}:
-            raise ValueError(f"pdf_mode must be 'image', 'text', or 'both', got: {pdf_mode}")
-
-        print(f"\nInput type detected: PDF")
-        print(f"PDF processing mode: {pdf_mode}")
-
-        # Load PDF files
-        pdf_files = _load_pdf_files(survey_input)
-
-        # Extract all pages from all PDFs
-        all_pages = []
-        for pdf_path in pdf_files:
-            pages = _get_pdf_pages(pdf_path)
-            all_pages.extend(pages)
-
-        if not all_pages:
-            raise ValueError("No pages found in the provided PDF files.")
-
-        items_to_process = all_pages
-        print(f"Total PDF pages to summarize: {len(items_to_process)}")
-    else:
-        # TEXT MODE: Normalize input to list
-        print(f"\nInput type detected: TEXT")
-        if isinstance(survey_input, str):
-            survey_input = [survey_input]
-        elif hasattr(survey_input, 'tolist'):
-            survey_input = survey_input.tolist()
-        else:
-            survey_input = list(survey_input)
-
-        items_to_process = survey_input
-        print(f"Total texts to summarize: {len(items_to_process)}")
-
-    # Normalize model input to list of tuples
-    models = normalize_model_input(user_model, api_key, model_source, models)
-
-    # Validate and prepare model configs
-    print(f"Validating {len(models)} model configuration(s)...")
-    model_configs = prepare_model_configs(models)
-
-    if not model_configs:
-        raise ValueError("No valid model configurations found.")
-
-    model_names = [cfg["sanitized_name"] for cfg in model_configs]
-    print(f"\nModels to use:")
-    for cfg in model_configs:
-        print(f"  - {cfg['model']} ({cfg['provider']}) -> column suffix: {cfg['sanitized_name']}")
-
-    # Build JSON schemas per provider (for summary output)
-    json_schemas = {}
-    for cfg in model_configs:
-        provider = cfg["provider"]
-        include_additional = provider != "google"
-        json_schemas[cfg["sanitized_name"]] = build_summary_json_schema(include_additional)
-
-    # Example JSON for prompt
-    example_json = '{"summary": "Your summary here"}'
-
-    # Gather step-back insights if enabled
-    stepback_insights = {}
-    if step_back_prompt:
-        print("\nGathering step-back insights...")
-        stepback_insights = gather_stepback_insights(
-            model_configs=model_configs,
-            context=input_description or "text summarization",
-            question=f"What are the key factors to consider when summarizing text{f' with a focus on {focus}' if focus else ''}?"
-        )
-
-    # Initialize results storage
-    all_results = []  # List of dicts, one per input item
-    failed_pairs = []  # List of (idx, model_name) pairs that failed
-
-    # Define the summarization function for a single item
-    def summarize_single_item(item, idx, cfg):
-        """Summarize a single text item or PDF page with a single model."""
-        model_name = cfg["sanitized_name"]
-
-        # Determine if this is a PDF page or text
-        if is_pdf_mode and isinstance(item, tuple) and len(item) == 3:
-            # PDF mode: item is (pdf_path, page_index, page_label)
-            pdf_path, page_index, page_label = item
-
-            try:
-                # Prepare page data based on mode and provider
-                page_data = _prepare_page_data(
-                    pdf_path=pdf_path,
-                    page_index=page_index,
-                    page_label=page_label,
-                    pdf_mode=pdf_mode,
-                    provider=cfg["provider"],
-                    pdf_dpi=pdf_dpi,
-                )
-
-                # Check for extraction errors
-                if page_data.get("error"):
-                    return (model_name, '{"summary": ""}', page_data["error"])
-
-                # Build PDF summarization prompt
-                messages = build_pdf_summarization_prompt(
-                    page_data=page_data,
-                    input_description=input_description,
-                    summary_instructions=summary_instructions,
-                    max_length=max_length,
-                    focus=focus,
-                    provider=cfg["provider"],
-                    pdf_mode=pdf_mode,
-                    chain_of_thought=chain_of_thought,
-                    context_prompt=context_prompt,
-                    step_back_prompt=step_back_prompt,
-                    stepback_insights=stepback_insights,
-                    model_name=model_name,
-                )
-
-                # Create client and make API call
-                client = UnifiedLLMClient(
-                    provider=cfg["provider"],
-                    api_key=cfg["api_key"],
-                    model=cfg["model"],
-                )
-
-                json_schema = json_schemas[model_name]
-
-                # Handle Google multimodal differently
-                if cfg["provider"] == "google" and pdf_mode != "text":
-                    response = _call_google_multimodal(
-                        client=client,
-                        messages=messages,
-                        json_schema=json_schema,
-                        creativity=creativity,
-                        thinking_budget=0,
-                        max_retries=max_retries,
-                    )
-                else:
-                    response = client.complete(
-                        messages=messages,
-                        json_schema=json_schema,
-                        creativity=creativity,
-                        max_retries=max_retries,
-                    )
-
-                # Extract JSON from response
-                json_str = extract_json(response)
-
-                return (model_name, json_str, None)
-
-            except Exception as e:
-                error_msg = str(e)
-                return (model_name, '{"summary": ""}', error_msg)
-
-        else:
-            # TEXT MODE: Original text handling
-            # Skip empty/null items
-            if item is None or (isinstance(item, str) and not item.strip()) or pd.isna(item):
-                return (model_name, '{"summary": ""}', "skipped")
-
-            try:
-                # Build the prompt
-                messages = build_text_summarization_prompt(
-                    response_text=str(item),
-                    input_description=input_description,
-                    summary_instructions=summary_instructions,
-                    max_length=max_length,
-                    focus=focus,
-                    chain_of_thought=chain_of_thought,
-                    context_prompt=context_prompt,
-                    step_back_prompt=step_back_prompt,
-                    stepback_insights=stepback_insights,
-                    model_name=model_name,
-                )
-
-                # Create client and make API call
-                client = UnifiedLLMClient(
-                    provider=cfg["provider"],
-                    api_key=cfg["api_key"],
-                    model=cfg["model"],
-                )
-
-                json_schema = json_schemas[model_name]
-
-                response = client.complete(
-                    messages=messages,
-                    json_schema=json_schema,
-                    creativity=creativity,
-                    max_retries=max_retries,
-                )
-
-                # Extract JSON from response
-                json_str = extract_json(response)
-
-                return (model_name, json_str, None)
-
-            except Exception as e:
-                error_msg = str(e)
-                return (model_name, '{"summary": ""}', error_msg)
-
-    # Process all items
-    progress_desc = "Summarizing PDF pages" if is_pdf_mode else "Summarizing texts"
-    print(f"\n{progress_desc}...")
-
-    # Determine number of workers
-    max_workers = min(len(model_configs), 4)
-
-    # Progress tracking
-    total_items = len(items_to_process)
-
-    for idx, item in enumerate(tqdm(items_to_process, desc=progress_desc)):
-        item_results = {}
-        item_errors = {}
-
-        # Process with each model (in parallel if multiple models)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(summarize_single_item, item, idx, cfg): cfg["sanitized_name"]
-                for cfg in model_configs
-            }
-
-            for future in as_completed(futures):
-                model_name, json_result, error = future.result()
-                item_results[model_name] = json_result
-                if error and error != "skipped":
-                    item_errors[model_name] = error
-                    failed_pairs.append((idx, model_name))
-
-        # Store results for this item
-        result_entry = {
-            "idx": idx,
-            "survey_input": item,
-            "model_results": item_results,
-            "errors": item_errors,
-        }
-        all_results.append(result_entry)
-
-        # Progress callback
-        if progress_callback:
-            progress_callback(idx + 1, total_items)
-
-    # Batch retries for failed pairs
-    for retry_pass in range(batch_retries):
-        if not failed_pairs:
-            break
-
-        print(f"\n[Batch retry {retry_pass + 1}/{batch_retries}] Retrying {len(failed_pairs)} failed (row, model) pairs...")
-        time.sleep(retry_delay)
-
-        retry_success = 0
-        still_failed = []
-
-        for idx, model_name in failed_pairs:
-            cfg = next((c for c in model_configs if c["sanitized_name"] == model_name), None)
-            if not cfg:
-                continue
-
-            item = items_to_process[idx]
-            model_name_result, json_result, error = summarize_single_item(item, idx, cfg)
-
-            if error and error != "skipped":
-                still_failed.append((idx, model_name))
-            else:
-                # Update the stored result
-                all_results[idx]["model_results"][model_name] = json_result
-                if model_name in all_results[idx]["errors"]:
-                    del all_results[idx]["errors"][model_name]
-                retry_success += 1
-
-        failed_pairs = still_failed
-        print(f"  -> {retry_success}/{len(failed_pairs) + retry_success} pairs succeeded on retry")
-
-    # Build output DataFrame
-    print("\nBuilding output DataFrame...")
-
-    rows = []
-    for entry in all_results:
-        # Handle PDF mode: extract metadata from tuple
-        item = entry["survey_input"]
-        if is_pdf_mode and isinstance(item, tuple) and len(item) == 3:
-            pdf_path, page_index, page_label = item
-            row = {
-                "survey_input": page_label,
-                "pdf_path": pdf_path,
-                "page_index": page_index,
-            }
-            original_text_for_synthesis = page_label  # Use page label for synthesis context
-        else:
-            row = {"survey_input": item}
-            original_text_for_synthesis = item
-
-        # Extract summaries from each model
-        summaries = {}
-        for model_name, json_str in entry["model_results"].items():
-            is_valid, summary_text = extract_summary_from_json(json_str)
-            if is_valid:
-                summaries[model_name] = summary_text
-            else:
-                summaries[model_name] = ""
-
-        # For multi-model: synthesize consensus
-        if len(model_configs) > 1:
-            # Add individual model summaries
-            for model_name in model_names:
-                row[f"summary_{model_name}"] = summaries.get(model_name, "")
-
-            # Synthesize consensus summary using the first successful model
-            valid_summaries = {k: v for k, v in summaries.items() if v}
-            if valid_summaries:
-                # Use the first model config for synthesis
-                synthesis_cfg = model_configs[0]
-                consensus = _synthesize_summaries(
-                    summaries=valid_summaries,
-                    original_text=str(original_text_for_synthesis),
-                    synthesis_config=synthesis_cfg,
-                    max_retries=max_retries,
-                )
-                row["summary"] = consensus
-            else:
-                row["summary"] = ""
-
-            # Track failed models
-            row["failed_models"] = ",".join(entry["errors"].keys()) if entry["errors"] else ""
-
-        else:
-            # Single model: just use the summary directly
-            model_name = model_names[0]
-            row["summary"] = summaries.get(model_name, "")
-
-        # Processing status
-        if all(not s for s in summaries.values()):
-            # For PDF mode, check if it's a valid tuple (never skip PDFs)
-            if is_pdf_mode:
-                row["processing_status"] = "error"
-            elif item is None or (isinstance(item, str) and not item.strip()):
-                row["processing_status"] = "skipped"
-            else:
-                row["processing_status"] = "error"
-        elif any(not s for s in summaries.values()):
-            row["processing_status"] = "partial"
-        else:
-            row["processing_status"] = "success"
-
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-
-    # Save to file if requested
-    if filename:
-        save_path = os.path.join(save_directory, filename) if save_directory else filename
-        df.to_csv(save_path, index=False)
-        print(f"\nResults saved to: {save_path}")
-
-    return df
-
-
-def _synthesize_summaries(
-    summaries: dict,
-    original_text: str,
-    synthesis_config: dict,
-    max_retries: int = 3,
-) -> str:
-    """
-    Synthesize multiple model summaries into one consensus summary.
-
-    Args:
-        summaries: Dict of {model_name: summary_text}
-        original_text: The original text that was summarized
-        synthesis_config: Model config to use for synthesis
-        max_retries: Max retries for synthesis call
-
-    Returns:
-        Synthesized consensus summary string
-    """
-    if len(summaries) == 1:
-        return list(summaries.values())[0]
-
-    # Build synthesis prompt
-    summaries_text = "\n".join([
-        f"- {model}: \"{summary}\""
-        for model, summary in summaries.items()
-    ])
-
-    # Truncate original text if too long
-    max_original_len = 500
-    original_display = original_text[:max_original_len]
-    if len(original_text) > max_original_len:
-        original_display += "..."
-
-    synthesis_prompt = f"""You are synthesizing multiple AI-generated summaries of the same text into one optimal summary.
-
-Original text: "{original_display}"
-
-Summaries from different models:
-{summaries_text}
-
-Create a single, comprehensive summary that captures the best insights from all summaries.
-Resolve any contradictions by focusing on accuracy.
-
-Provide your answer in JSON format: {{"summary": "your synthesized summary"}}"""
-
-    try:
-        client = UnifiedLLMClient(
-            provider=synthesis_config["provider"],
-            api_key=synthesis_config["api_key"],
-            model=synthesis_config["model"],
-        )
-
-        json_schema = build_summary_json_schema(
-            include_additional_properties=synthesis_config["provider"] != "google"
-        )
-
-        response = client.complete(
-            messages=[{"role": "user", "content": synthesis_prompt}],
-            json_schema=json_schema,
-            creativity=0.3,  # Low creativity for synthesis
-            max_retries=max_retries,
-        )
-
-        json_str = extract_json(response)
-        is_valid, summary = extract_summary_from_json(json_str)
-
-        if is_valid:
-            return summary
-        else:
-            # Fallback: return the longest summary
-            return max(summaries.values(), key=len)
-
-    except Exception as e:
-        print(f"Warning: Synthesis failed ({e}), using longest summary as fallback")
-        return max(summaries.values(), key=len)

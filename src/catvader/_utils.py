@@ -1,5 +1,5 @@
 """
-Shared utilities for CatLLM.
+Shared utilities for CatVader.
 
 This module provides utility functions for JSON handling, file loading,
 encoding, and other common operations used across the package.
@@ -129,7 +129,7 @@ def ollama_two_step_classify(
 
     Args:
         client: UnifiedLLMClient instance
-        response_text: The survey response to classify
+        response_text: The social media post to classify
         categories: List of category names
         categories_str: Pre-formatted category string
         survey_question: Optional context
@@ -140,7 +140,7 @@ def ollama_two_step_classify(
         tuple: (json_string, error_message or None)
     """
     num_categories = len(categories)
-    survey_context = f"A respondent was asked: {survey_question}." if survey_question else ""
+    survey_context = f"Posts are from: {survey_question}." if survey_question else ""
 
     # ==========================================================================
     # Step 1: Classification (natural language - focus on accuracy)
@@ -148,13 +148,13 @@ def ollama_two_step_classify(
     step1_messages = [
         {
             "role": "system",
-            "content": "You are an expert at categorizing survey responses. Focus on accurate classification."
+            "content": "You are an expert at classifying social media posts. Focus on accurate classification."
         },
         {
             "role": "user",
             "content": f"""{survey_context}
 
-Analyze this survey response and determine which categories apply:
+Analyze this social media post and determine which categories apply:
 
 Response: "{response_text}"
 

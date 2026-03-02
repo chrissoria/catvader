@@ -1,14 +1,73 @@
 """
-Unified functions for classification and category extraction.
+Category extraction functions for CatVader.
+
+This module provides unified category extraction from text, image, and PDF inputs.
 """
 
-__all__ = ["extract", "summarize"]
+import warnings
+
+from ._social_media import fetch_social_media, SUPPORTED_SOURCES
+
+__all__ = [
+    # Main entry point
+    "extract",
+    # Input-specific functions (for backward compatibility)
+    "explore_common_categories",
+    "explore_corpus",
+    "explore_image_categories",
+    "explore_pdf_categories",
+]
+
+# Import provider infrastructure
+from ._providers import (
+    UnifiedLLMClient,
+    detect_provider,
+)
+
+# Import the implementation functions from existing modules
+from .text_functions import (
+    explore_common_categories,
+    explore_corpus,
+)
+
+from .image_functions import (
+    explore_image_categories,
+)
+
+from .pdf_functions import (
+    explore_pdf_categories,
+)
+
+
+def _build_social_media_context(platform, handle, hashtags, post_metadata):
+    """Build a context block string from social media metadata fields."""
+    parts = []
+    if platform:
+        parts.append(f"Platform: {platform}")
+    if handle:
+        parts.append(f"Author: {handle}")
+    if hashtags:
+        tags = hashtags if isinstance(hashtags, str) else " ".join(hashtags)
+        parts.append(f"Hashtags: {tags}")
+    if post_metadata:
+        for k, v in post_metadata.items():
+            parts.append(f"{k.capitalize()}: {v}")
+    return "\n".join(parts)
 
 
 def extract(
-    input_data,
-    api_key,
+    input_data=None,
+    api_key=None,
     input_type="text",
+    # Social media source
+    sm_source: str = None,
+    sm_limit: int = 50,
+    sm_credentials: dict = None,
+    # Social media context fields
+    platform: str = None,
+    handle: str = None,
+    hashtags=None,
+    post_metadata: dict = None,
     description="",
     max_categories=12,
     categories_per_chunk=10,
@@ -23,6 +82,7 @@ def extract(
     iterations=8,
     random_state=None,
     focus=None,
+    progress_callback=None,
 ):
     """
     Unified category extraction function for text, image, and PDF inputs.
@@ -36,7 +96,12 @@ def extract(
             - For text: list of text responses or pandas Series
             - For image: directory path, single file, or list of image paths
             - For pdf: directory path, single file, or list of PDF paths
+            - Omit when using sm_source (text is fetched automatically).
         api_key (str): API key for the model provider.
+        sm_source (str): Social media platform to pull feed text from.
+            Supported: "threads"
+        sm_limit (int): Number of posts to fetch. Default 50.
+        sm_credentials (dict): Platform credentials. Falls back to env vars.
         input_type (str): Type of input data. Options:
             - "text" (default): Text/survey responses
             - "image": Image files
@@ -64,6 +129,8 @@ def extract(
         focus (str): Optional focus instruction for category extraction (e.g.,
             "decisions to move", "emotional responses"). When provided, the model
             will prioritize extracting categories related to this focus.
+        progress_callback (callable): Optional callback function for progress updates.
+            Called as progress_callback(current_step, total_steps, step_label).
 
     Returns:
         dict with keys:
@@ -72,7 +139,7 @@ def extract(
             - raw_top_text: Raw model output from final merge step
 
     Examples:
-        >>> import catllm as cat
+        >>> import catvader as cat
         >>>
         >>> # Extract categories from survey responses
         >>> results = cat.extract(
@@ -99,10 +166,27 @@ def extract(
         ...     api_key="your-api-key"
         ... )
     """
+    # Fetch feed text from social media when sm_source is set
+    if sm_source is not None:
+        if input_data is not None:
+            raise ValueError("Pass either input_data or sm_source, not both.")
+        print(f"[CatVader] Fetching feed from '{sm_source}' (limit={sm_limit})...")
+        _sm_df = fetch_social_media(sm_source, limit=sm_limit, credentials=sm_credentials)
+        input_data = _sm_df["text"].tolist()
+        print(f"[CatVader] Fetched {len(input_data)} posts.")
+    elif input_data is None:
+        raise ValueError(
+            f"Provide either input_data or sm_source={SUPPORTED_SOURCES}."
+        )
+
+    # Prepend social media context to description if any fields provided
+    sm_context = _build_social_media_context(platform, handle, hashtags, post_metadata)
+    if sm_context:
+        description = f"{sm_context}\n{description}".strip() if description else sm_context
+
     input_type = input_type.lower().rstrip('s')  # Normalize: "texts" -> "text", "images" -> "image", "pdfs" -> "pdf"
 
     if input_type == "text":
-        from .text_functions import explore_common_categories
         return explore_common_categories(
             survey_input=input_data,
             api_key=api_key,
@@ -119,10 +203,10 @@ def extract(
             iterations=iterations,
             random_state=random_state,
             focus=focus,
+            progress_callback=progress_callback,
         )
 
     elif input_type == "image":
-        from .image_functions import explore_image_categories
         return explore_image_categories(
             image_input=input_data,
             api_key=api_key,
@@ -138,11 +222,11 @@ def extract(
             filename=filename,
             model_source=model_source,
             iterations=iterations,
-            random_state=random_state
+            random_state=random_state,
+            progress_callback=progress_callback,
         )
 
     elif input_type == "pdf":
-        from .pdf_functions import explore_pdf_categories
         return explore_pdf_categories(
             pdf_input=input_data,
             api_key=api_key,
@@ -158,7 +242,8 @@ def extract(
             filename=filename,
             model_source=model_source,
             iterations=iterations,
-            random_state=random_state
+            random_state=random_state,
+            progress_callback=progress_callback,
         )
 
     else:
@@ -170,127 +255,3 @@ def extract(
             f"  - For image files (.jpg, .png, etc.): input_type='image'\n"
             f"  - For PDF documents: input_type='pdf'"
         )
-
-
-
-
-def summarize(
-    input_data,
-    api_key: str = None,
-    description: str = "",
-    instructions: str = "",
-    max_length: int = None,
-    focus: str = None,
-    user_model: str = "gpt-4o",
-    model_source: str = "auto",
-    mode: str = "image",
-    creativity: float = None,
-    chain_of_thought: bool = True,
-    context_prompt: bool = False,
-    step_back_prompt: bool = False,
-    filename: str = None,
-    save_directory: str = None,
-    progress_callback=None,
-    models: list = None,
-):
-    """
-    Summarize text or PDF data using LLMs.
-
-    Supports single-model and multi-model (ensemble) summarization. In multi-model
-    mode, summaries from all models are synthesized into a consensus summary.
-    Input type is auto-detected from the data (text strings or PDF paths).
-
-    Args:
-        input_data: Data to summarize. Can be:
-            - Text: list of strings, pandas Series, or single string
-            - PDF: directory path, single PDF path, or list of PDF paths
-        api_key (str): API key for the model provider (single-model mode)
-        description (str): Description of what the content contains (provides context)
-        instructions (str): Specific summarization instructions (e.g., "bullet points")
-        max_length (int): Maximum summary length in words
-        focus (str): What to focus on (e.g., "main arguments", "emotional content")
-        user_model (str): Model to use (default "gpt-4o")
-        model_source (str): Provider - "auto", "openai", "anthropic", "google", etc.
-        mode (str): PDF processing mode (only used for PDF input):
-            - "image" (default): Render pages as images
-            - "text": Extract text only
-            - "both": Send both image and extracted text
-        creativity (float): Temperature setting (None uses provider default)
-        chain_of_thought (bool): Enable step-by-step reasoning (default True)
-        context_prompt (bool): Add expert context prefix
-        step_back_prompt (bool): Enable step-back prompting
-        filename (str): Output CSV filename
-        save_directory (str): Directory to save results
-        progress_callback: Optional callback for progress updates
-        models (list): For multi-model mode, list of (model, provider, api_key) tuples
-
-    Returns:
-        pd.DataFrame: Results with summary column(s):
-            - survey_input: Original text or page label (for PDFs)
-            - summary: Generated summary (or consensus for multi-model)
-            - summary_<model>: Per-model summaries (multi-model only)
-            - processing_status: "success", "error", "skipped"
-            - failed_models: Comma-separated list (multi-model only)
-            - pdf_path: Path to source PDF (PDF mode only)
-            - page_index: Page number, 0-indexed (PDF mode only)
-
-    Examples:
-        >>> import catllm as cat
-        >>>
-        >>> # Single model text summarization
-        >>> results = cat.summarize(
-        ...     input_data=df['responses'],
-        ...     description="Customer feedback",
-        ...     api_key="your-api-key"
-        ... )
-        >>>
-        >>> # PDF summarization (auto-detected)
-        >>> results = cat.summarize(
-        ...     input_data="/path/to/pdfs/",
-        ...     description="Research papers",
-        ...     mode="image",
-        ...     api_key="your-api-key"
-        ... )
-        >>>
-        >>> # PDF summarization with list of files
-        >>> results = cat.summarize(
-        ...     input_data=["doc1.pdf", "doc2.pdf"],
-        ...     description="Financial reports",
-        ...     mode="both",
-        ...     focus="key metrics",
-        ...     api_key="your-api-key"
-        ... )
-        >>>
-        >>> # Multi-model with synthesis
-        >>> results = cat.summarize(
-        ...     input_data=df['responses'],
-        ...     models=[
-        ...         ("gpt-4o", "openai", "sk-..."),
-        ...         ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-..."),
-        ...     ],
-        ... )
-    """
-    from .text_functions_ensemble import summarize_ensemble
-
-    # Map mode to pdf_mode
-    pdf_mode = mode if mode in ("image", "text", "both") else "image"
-
-    return summarize_ensemble(
-        survey_input=input_data,
-        api_key=api_key,
-        input_description=description,
-        summary_instructions=instructions,
-        max_length=max_length,
-        focus=focus,
-        user_model=user_model,
-        model_source=model_source,
-        pdf_mode=pdf_mode,
-        creativity=creativity,
-        chain_of_thought=chain_of_thought,
-        context_prompt=context_prompt,
-        step_back_prompt=step_back_prompt,
-        filename=filename,
-        save_directory=save_directory,
-        progress_callback=progress_callback,
-        models=models,
-    )

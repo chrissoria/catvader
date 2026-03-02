@@ -1,40 +1,8 @@
 """
-Category extraction functions for CatLLM.
-
-This module provides unified category extraction from text, image, and PDF inputs.
+Unified functions for classification and category extraction.
 """
 
-import warnings
-
-__all__ = [
-    # Main entry point
-    "extract",
-    # Input-specific functions (for backward compatibility)
-    "explore_common_categories",
-    "explore_corpus",
-    "explore_image_categories",
-    "explore_pdf_categories",
-]
-
-# Import provider infrastructure
-from ._providers import (
-    UnifiedLLMClient,
-    detect_provider,
-)
-
-# Import the implementation functions from existing modules
-from .text_functions import (
-    explore_common_categories,
-    explore_corpus,
-)
-
-from .image_functions import (
-    explore_image_categories,
-)
-
-from .pdf_functions import (
-    explore_pdf_categories,
-)
+__all__ = ["extract"]
 
 
 def extract(
@@ -55,7 +23,6 @@ def extract(
     iterations=8,
     random_state=None,
     focus=None,
-    progress_callback=None,
 ):
     """
     Unified category extraction function for text, image, and PDF inputs.
@@ -97,8 +64,6 @@ def extract(
         focus (str): Optional focus instruction for category extraction (e.g.,
             "decisions to move", "emotional responses"). When provided, the model
             will prioritize extracting categories related to this focus.
-        progress_callback (callable): Optional callback function for progress updates.
-            Called as progress_callback(current_step, total_steps, step_label).
 
     Returns:
         dict with keys:
@@ -107,7 +72,7 @@ def extract(
             - raw_top_text: Raw model output from final merge step
 
     Examples:
-        >>> import catllm as cat
+        >>> import catvader as cat
         >>>
         >>> # Extract categories from survey responses
         >>> results = cat.extract(
@@ -137,6 +102,7 @@ def extract(
     input_type = input_type.lower().rstrip('s')  # Normalize: "texts" -> "text", "images" -> "image", "pdfs" -> "pdf"
 
     if input_type == "text":
+        from .text_functions import explore_common_categories
         return explore_common_categories(
             survey_input=input_data,
             api_key=api_key,
@@ -153,10 +119,10 @@ def extract(
             iterations=iterations,
             random_state=random_state,
             focus=focus,
-            progress_callback=progress_callback,
         )
 
     elif input_type == "image":
+        from .image_functions import explore_image_categories
         return explore_image_categories(
             image_input=input_data,
             api_key=api_key,
@@ -172,11 +138,11 @@ def extract(
             filename=filename,
             model_source=model_source,
             iterations=iterations,
-            random_state=random_state,
-            progress_callback=progress_callback,
+            random_state=random_state
         )
 
     elif input_type == "pdf":
+        from .pdf_functions import explore_pdf_categories
         return explore_pdf_categories(
             pdf_input=input_data,
             api_key=api_key,
@@ -192,8 +158,7 @@ def extract(
             filename=filename,
             model_source=model_source,
             iterations=iterations,
-            random_state=random_state,
-            progress_callback=progress_callback,
+            random_state=random_state
         )
 
     else:
@@ -205,3 +170,7 @@ def extract(
             f"  - For image files (.jpg, .png, etc.): input_type='image'\n"
             f"  - For PDF documents: input_type='pdf'"
         )
+
+
+
+

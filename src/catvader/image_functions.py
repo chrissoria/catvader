@@ -11,12 +11,6 @@ __all__ = [
     "image_features",
     "explore_image_categories",
 ]
-from .calls.image_CoVe import (
-    image_chain_of_verification_openai,
-    image_chain_of_verification_anthropic,
-    image_chain_of_verification_google,
-    image_chain_of_verification_mistral
-)
 
 
 def _load_image_files(image_input):
@@ -84,7 +78,6 @@ def image_multi_class(
     user_model="gpt-4o",
     creativity=None,
     safety=False,
-    chain_of_verification=False,
     chain_of_thought=True,
     step_back_prompt=False,
     context_prompt=False,
@@ -103,11 +96,11 @@ def image_multi_class(
     Classify images using LLMs.
 
     .. deprecated::
-        Use :func:`catllm.classify` instead. This function will be removed in a future version.
+        Use :func:`catvader.classify` instead. This function will be removed in a future version.
     """
     warnings.warn(
         "image_multi_class() is deprecated and will be removed in a future version. "
-        "Use catllm.classify() instead, which auto-detects image input.",
+        "Use catvader.classify() instead, which auto-detects image input.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -159,23 +152,6 @@ def image_multi_class(
         examples_text = "Here are some examples of how to categorize:\n" + "\n".join(examples)
     else:
         examples_text = ""
-
-    # Helper function for CoVe
-    def remove_numbering(line):
-        line = line.strip()
-        if line.startswith('- '):
-            return line[2:].strip()
-        if line.startswith('• '):
-            return line[2:].strip()
-        if line and line[0].isdigit():
-            i = 0
-            while i < len(line) and line[i].isdigit():
-                i += 1
-            if i < len(line) and line[i] in '.':
-                return line[i+1:].strip()
-            elif i < len(line) and line[i] in ')':
-                return line[i+1:].strip()
-        return line
 
     # Step-back insight initialization
     if step_back_prompt:
@@ -241,46 +217,6 @@ Provide a brief analysis of what visual cues to look for when categorizing such 
 
         return base_text
 
-    def _build_cove_prompts(base_prompt_text):
-        """Build chain of verification prompts for images."""
-        step2_prompt = f"""You provided this initial categorization:
-<<INITIAL_REPLY>>
-
-Original task: {base_prompt_text}
-
-Generate a focused list of 3-5 verification questions to fact-check your categorization. Each question should:
-- Be concise and specific (one sentence)
-- Address a distinct visual element or category assignment
-- Be answerable by re-examining the image
-
-Focus on verifying:
-- Whether each category assignment matches what's visible in the image
-- Whether any visual elements were missed or misinterpreted
-- Whether there are any logical inconsistencies
-
-Provide only the verification questions as a numbered list."""
-
-        step3_prompt = f"""Re-examine the attached image and answer the following verification question.
-
-Image description: {image_description}
-
-Verification question: <<QUESTION>>
-
-Provide a brief, direct answer (1-2 sentences maximum) based on what you observe in the image.
-
-Answer:"""
-
-        step4_prompt = f"""Original task: {base_prompt_text}
-Initial categorization:
-<<INITIAL_REPLY>>
-Verification questions and answers:
-<<VERIFICATION_QA>>
-Based on this verification, provide the final corrected categorization.
-If no categories are present, assign "0" to all categories.
-Provide the final categorization in the same JSON format:"""
-
-        return step2_prompt, step3_prompt, step4_prompt
-
     def _build_prompt_openai_mistral(encoded, ext, base_text):
         """Build prompt for OpenAI/Mistral format."""
         encoded_image = f"data:image/{ext};base64,{encoded}"
@@ -312,13 +248,13 @@ Provide the final categorization in the same JSON format:"""
             "mime_type": f"image/{ext}" if ext else "image/jpeg"
         }
 
-    def _call_openai_compatible(prompt, step2_prompt, step3_prompt, step4_prompt, image_content):
+    def _call_openai_compatible(prompt, image_content):
         """Handle OpenAI-compatible API calls (OpenAI, Perplexity, HuggingFace, xAI)."""
         import requests as req
 
         # Determine the base URL based on model source
         if model_source == "huggingface":
-            from catllm.text_functions import _detect_huggingface_endpoint
+            from catvader.text_functions import _detect_huggingface_endpoint
             base_url = _detect_huggingface_endpoint(api_key, user_model)
         elif model_source == "huggingface-together":
             base_url = "https://router.huggingface.co/together/v1"
@@ -360,19 +296,6 @@ Provide the final categorization in the same JSON format:"""
                 result = response.json()
                 reply = result["choices"][0]["message"]["content"]
 
-                if chain_of_verification:
-                    reply = image_chain_of_verification_openai(
-                        initial_reply=reply,
-                        step2_prompt=step2_prompt,
-                        step3_prompt=step3_prompt,
-                        step4_prompt=step4_prompt,
-                        client=None,  # Not used anymore, CoVe needs refactoring too
-                        user_model=user_model,
-                        creativity=creativity,
-                        remove_numbering=remove_numbering,
-                        image_content=image_content
-                    )
-
                 return reply, None
 
             except req.exceptions.HTTPError as e:
@@ -407,7 +330,7 @@ Provide the final categorization in the same JSON format:"""
 
         return """{"1":"e"}""", "Max retries exceeded"
 
-    def _call_anthropic(prompt, step2_prompt, step3_prompt, step4_prompt, image_content):
+    def _call_anthropic(prompt, image_content):
         """Handle Anthropic API calls using direct HTTP requests."""
         import requests as req
 
@@ -444,20 +367,6 @@ Provide the final categorization in the same JSON format:"""
             else:
                 return """{"1":"e"}""", "No text content in response"
 
-            if chain_of_verification:
-                reply = image_chain_of_verification_anthropic(
-                    initial_reply=reply,
-                    step2_prompt=step2_prompt,
-                    step3_prompt=step3_prompt,
-                    step4_prompt=step4_prompt,
-                    client=None,  # No longer using SDK client
-                    user_model=user_model,
-                    creativity=creativity,
-                    remove_numbering=remove_numbering,
-                    image_content=image_content,
-                    api_key=api_key  # Pass api_key for HTTP calls
-                )
-
             return reply, None
 
         except req.exceptions.HTTPError as e:
@@ -469,7 +378,7 @@ Provide the final categorization in the same JSON format:"""
             print(f"An error occurred: {e}")
             return """{"1":"e"}""", f"Error processing input: {e}"
 
-    def _call_google(prompt_data, step2_prompt, step3_prompt, step4_prompt, base_prompt_text):
+    def _call_google(prompt_data, base_prompt_text):
         """Handle Google API calls."""
         import requests
 
@@ -527,22 +436,6 @@ Provide the final categorization in the same JSON format:"""
             else:
                 return "No response generated", None
 
-            if chain_of_verification:
-                reply = image_chain_of_verification_google(
-                    initial_reply=reply,
-                    prompt=base_prompt_text,
-                    step2_prompt=step2_prompt,
-                    step3_prompt=step3_prompt,
-                    step4_prompt=step4_prompt,
-                    url=url,
-                    headers=headers,
-                    creativity=creativity,
-                    remove_numbering=remove_numbering,
-                    make_google_request=make_google_request,
-                    image_data=prompt_data["image_data"],
-                    mime_type=prompt_data["mime_type"]
-                )
-
             return reply, None
 
         except requests.exceptions.HTTPError as e:
@@ -557,7 +450,7 @@ Provide the final categorization in the same JSON format:"""
             print(f"An error occurred: {e}")
             return """{"1":"e"}""", f"Error processing input: {e}"
 
-    def _call_mistral(prompt, step2_prompt, step3_prompt, step4_prompt, image_content):
+    def _call_mistral(prompt, image_content):
         """Handle Mistral API calls - uses requests directly."""
         import requests as req
 
@@ -590,19 +483,6 @@ Provide the final categorization in the same JSON format:"""
                 response.raise_for_status()
                 result = response.json()
                 reply = result["choices"][0]["message"]["content"]
-
-                if chain_of_verification:
-                    reply = image_chain_of_verification_mistral(
-                        initial_reply=reply,
-                        step2_prompt=step2_prompt,
-                        step3_prompt=step3_prompt,
-                        step4_prompt=step4_prompt,
-                        client=None,  # Not used anymore, CoVe needs refactoring too
-                        user_model=user_model,
-                        creativity=creativity,
-                        remove_numbering=remove_numbering,
-                        image_content=image_content
-                    )
 
                 return reply, None
 
@@ -638,17 +518,11 @@ Provide the final categorization in the same JSON format:"""
 
         base_prompt_text = _build_base_prompt_text()
 
-        if chain_of_verification:
-            step2_prompt, step3_prompt, step4_prompt = _build_cove_prompts(base_prompt_text)
-        else:
-            step2_prompt = step3_prompt = step4_prompt = None
-
         if model_source in ["openai", "perplexity", "huggingface", "xai"]:
             prompt = _build_prompt_openai_mistral(encoded, ext, base_prompt_text)
-            # Image content for CoVe (just the image part)
             encoded_image = f"data:image/{ext};base64,{encoded}"
             image_content = {"type": "image_url", "image_url": {"url": encoded_image, "detail": "high"}}
-            return _call_openai_compatible(prompt, step2_prompt, step3_prompt, step4_prompt, image_content)
+            return _call_openai_compatible(prompt, image_content)
 
         elif model_source == "anthropic":
             prompt = _build_prompt_anthropic(encoded, ext, base_prompt_text)
@@ -657,17 +531,17 @@ Provide the final categorization in the same JSON format:"""
                 "type": "image",
                 "source": {"type": "base64", "media_type": media_type, "data": encoded}
             }
-            return _call_anthropic(prompt, step2_prompt, step3_prompt, step4_prompt, image_content)
+            return _call_anthropic(prompt, image_content)
 
         elif model_source == "google":
             prompt_data = _build_prompt_google(encoded, ext, base_prompt_text)
-            return _call_google(prompt_data, step2_prompt, step3_prompt, step4_prompt, base_prompt_text)
+            return _call_google(prompt_data, base_prompt_text)
 
         elif model_source == "mistral":
             prompt = _build_prompt_openai_mistral(encoded, ext, base_prompt_text)
             encoded_image = f"data:image/{ext};base64,{encoded}"
             image_content = {"type": "image_url", "image_url": {"url": encoded_image, "detail": "high"}}
-            return _call_mistral(prompt, step2_prompt, step3_prompt, step4_prompt, image_content)
+            return _call_mistral(prompt, image_content)
 
         else:
             raise ValueError("Unknown source! Choose from OpenAI, Anthropic, Perplexity, Google, xAI, Huggingface, or Mistral")
@@ -1555,7 +1429,7 @@ def explore_image_categories(
 
     # Determine base URL for OpenAI-compatible providers
     if model_source == "huggingface":
-        from catllm.text_functions import _detect_huggingface_endpoint
+        from catvader.text_functions import _detect_huggingface_endpoint
         openai_base_url = _detect_huggingface_endpoint(api_key, user_model)
     elif model_source == "huggingface-together":
         openai_base_url = "https://router.huggingface.co/together/v1"
