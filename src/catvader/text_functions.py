@@ -1079,7 +1079,7 @@ When uncertain, prioritize precision over recall.
             if normalized_partial:
                 normalized_df = pd.concat(normalized_partial, ignore_index=True)
                 partial_df = pd.DataFrame({
-                    'survey_input': pd.Series(survey_input[:len(results)]).reset_index(drop=True),
+                    'social_media_input': pd.Series(survey_input[:len(results)]).reset_index(drop=True),
                     'model_response': [r[0] for r in results],
                     'error': [r[1] for r in results],
                     'json': pd.Series(extracted_jsons).reset_index(drop=True),
@@ -1107,7 +1107,7 @@ When uncertain, prioritize precision over recall.
 
     # Create main DataFrame
     df = pd.DataFrame({
-        'survey_input': pd.Series(survey_input).reset_index(drop=True),
+        'social_media_input': pd.Series(survey_input).reset_index(drop=True),
         'model_response': [r[0] for r in results],
         'error': [r[1] for r in results],
         'json': pd.Series(extracted_jsons).reset_index(drop=True),

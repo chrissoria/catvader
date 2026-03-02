@@ -1158,7 +1158,7 @@ def _save_partial_results(
             status = "success"
 
         row = {
-            "survey_input": result["response"],
+            "social_media_input": result["response"],
             "processing_status": status,
             "failed_models": ",".join(result["aggregated"]["failed_models"]) if result["aggregated"]["failed_models"] else "",
         }
@@ -2139,7 +2139,7 @@ def build_output_dataframes(
 
     # Initialize data structures
     combined_data = {
-        "survey_input": [],
+        "social_media_input": [],
         "processing_status": [],
         "failed_models": [],
     }
@@ -2165,7 +2165,7 @@ def build_output_dataframes(
 
     # Populate data
     for result in all_results:
-        combined_data["survey_input"].append(result["response"])
+        combined_data["social_media_input"].append(result["response"])
         aggregated = result["aggregated"]
 
         # Add PDF metadata if present
@@ -2234,7 +2234,7 @@ def build_output_dataframes(
         combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce').astype('Int64')
 
     # Create consensus-only DataFrame
-    consensus_cols = ["survey_input", "processing_status", "failed_models"]
+    consensus_cols = ["social_media_input", "processing_status", "failed_models"]
     # Add PDF columns if present
     if has_pdf_metadata:
         consensus_cols += ["pdf_path", "page_index"]
@@ -2251,7 +2251,7 @@ def build_output_dataframes(
     }
 
     for model_name in model_names:
-        model_cols = ["survey_input", "processing_status"]
+        model_cols = ["social_media_input", "processing_status"]
         # Add PDF columns if present
         if has_pdf_metadata:
             model_cols += ["pdf_path", "page_index"]
