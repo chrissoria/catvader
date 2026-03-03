@@ -6,12 +6,12 @@ Usage via classify():
     classify(
         feed_input=None,          # omit when using sm_source
         categories=[...],
-        sm_source="threads",      # platform to pull from ("threads" or "bluesky")
+        sm_source="threads",      # platform to pull from ("threads", "bluesky", "reddit")
         sm_limit=50,              # number of posts to fetch
         sm_credentials={...},     # optional; falls back to env vars
     )
 
-Supported sources: "threads", "bluesky"
+Supported sources: "threads", "bluesky", "reddit"
 """
 
 import os
@@ -214,7 +214,7 @@ def _bluesky_media_type(item: dict) -> str:
     return "TEXT_POST"
 
 
-def fetch_bluesky(limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
+def fetch_bluesky(limit: int = 50, months: int = None, credentials: dict = None, handle: str = None) -> pd.DataFrame:
     """
     Fetch recent Bluesky posts with engagement metrics.
 
@@ -224,6 +224,10 @@ def fetch_bluesky(limit: int = 50, months: int = None, credentials: dict = None)
         months (int): If set, only return posts from the last N months.
         credentials (dict): Optional dict with keys 'handle' and 'app_password'.
             Falls back to BLUESKY_HANDLE / BLUESKY_APP_PASSWORD env vars.
+            Not required when fetching another user's public posts.
+        handle (str): Bluesky handle of the account to fetch posts from
+            (e.g. "user.bsky.social"). When omitted, fetches the
+            authenticated user's own posts (credentials required).
 
     Returns:
         pd.DataFrame with columns:
@@ -231,11 +235,22 @@ def fetch_bluesky(limit: int = 50, months: int = None, credentials: dict = None)
             likes, replies, reposts, quotes, views, shares
         (views and shares are 0 — not exposed by the Bluesky API)
     """
-    handle, password = _load_bluesky_credentials(credentials)
-    session = _bluesky_create_session(handle, password)
-    access_token = session["accessJwt"]
-    actor = session["did"]
-    headers = {"Authorization": f"Bearer {access_token}"}
+    if handle:
+        # Fetching another user's public posts — auth is optional
+        actor = handle
+        headers = {}
+        try:
+            auth_handle, password = _load_bluesky_credentials(credentials)
+            session = _bluesky_create_session(auth_handle, password)
+            headers = {"Authorization": f"Bearer {session['accessJwt']}"}
+        except Exception:
+            pass  # public posts are readable without auth
+    else:
+        # Fetching own posts — auth required
+        auth_handle, password = _load_bluesky_credentials(credentials)
+        session = _bluesky_create_session(auth_handle, password)
+        actor = session["did"]
+        headers = {"Authorization": f"Bearer {session['accessJwt']}"}
 
     cutoff = None
     if months is not None:
@@ -292,16 +307,242 @@ def fetch_bluesky(limit: int = 50, months: int = None, credentials: dict = None)
     return pd.DataFrame(rows)
 
 
+# =============================================================================
+# Reddit
+# =============================================================================
+
+_REDDIT_BASE_URL = "https://www.reddit.com"
+_REDDIT_OAUTH_URL = "https://oauth.reddit.com"
+_REDDIT_USER_AGENT = "catvader/1.9.0"
+
+
+def _load_reddit_credentials(credentials: dict = None) -> dict:
+    """Return credentials dict, merging in env vars where not explicitly set."""
+    load_dotenv(_ENV_PATH, override=True)
+    creds = dict(credentials or {})
+    for key, env_var in [
+        ("client_id",     "REDDIT_CLIENT_ID"),
+        ("client_secret", "REDDIT_CLIENT_SECRET"),
+        ("username",      "REDDIT_USERNAME"),
+        ("subreddit",     "REDDIT_SUBREDDIT"),
+    ]:
+        if key not in creds and os.getenv(env_var):
+            creds[key] = os.getenv(env_var)
+    return creds
+
+
+def _reddit_oauth_token(client_id: str, client_secret: str) -> str:
+    """Obtain an app-only OAuth2 bearer token (no user login required)."""
+    r = requests.post(
+        f"{_REDDIT_BASE_URL}/api/v1/access_token",
+        auth=(client_id, client_secret),
+        headers={"User-Agent": _REDDIT_USER_AGENT},
+        data={"grant_type": "client_credentials"},
+    )
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def _reddit_extract_image_url(post: dict) -> str:
+    """Extract the best available image URL from a Reddit post."""
+    if post.get("post_hint") == "image":
+        return post.get("url", "")
+    preview_images = post.get("preview", {}).get("images", [])
+    if preview_images:
+        url = preview_images[0].get("source", {}).get("url", "")
+        return url.replace("&amp;", "&")
+    return ""
+
+
+def _reddit_media_type(post: dict) -> str:
+    """Derive a media_type string consistent with other platform fetchers."""
+    if post.get("crosspost_parent"):
+        return "REPOST_FACADE"  # consistent with Bluesky repost detection
+    hint = post.get("post_hint", "")
+    if hint == "image":
+        return "IMAGE"
+    if hint in ("rich:video", "hosted:video"):
+        return "VIDEO"
+    if post.get("is_self", False):
+        return "TEXT_POST"
+    return "LINK"
+
+
+def _reddit_post_to_row(post: dict) -> dict:
+    """Convert a Reddit API post object to the standard 11-column row dict."""
+    title = post.get("title", "")
+    selftext = post.get("selftext", "")
+    if selftext in ("[deleted]", "[removed]"):
+        selftext = ""
+    text = f"{title}\n\n{selftext}".strip() if selftext else title
+
+    created_utc = post.get("created_utc", 0)
+    ts_str = (
+        datetime.fromtimestamp(created_utc, tz=timezone.utc).isoformat()
+        if created_utc
+        else ""
+    )
+
+    return {
+        "post_id":    f"t3_{post.get('id', '')}",
+        "timestamp":  ts_str,
+        "media_type": _reddit_media_type(post),
+        "text":       text,
+        "image_url":  _reddit_extract_image_url(post),
+        "likes":      post.get("score", 0),
+        "replies":    post.get("num_comments", 0),
+        "reposts":    post.get("num_crossposts", 0),
+        "quotes":     0,
+        "views":      0,
+        "shares":     0,
+    }
+
+
+def _reddit_paginate(url: str, headers: dict, limit: int, months: int = None) -> list:
+    """Paginate a Reddit listing endpoint and return post rows."""
+    cutoff = None
+    if months is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    rows = []
+    after = None
+
+    while True:
+        params = {"limit": 100, "sort": "new"}
+        if after:
+            params["after"] = after
+
+        r = requests.get(url, headers=headers, params=params)
+        r.raise_for_status()
+
+        body = r.json().get("data", {})
+        children = body.get("children", [])
+        if not children:
+            break
+
+        for child in children:
+            post = child.get("data", {})
+            created_utc = post.get("created_utc", 0)
+            if cutoff and created_utc:
+                ts = datetime.fromtimestamp(created_utc, tz=timezone.utc)
+                if ts < cutoff:
+                    return rows  # posts are newest-first; stop once past window
+
+            rows.append(_reddit_post_to_row(post))
+
+            if months is None and len(rows) >= limit:
+                return rows
+
+        after = body.get("after")
+        if not after:
+            break
+
+    return rows
+
+
+def fetch_reddit(limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
+    """
+    Fetch Reddit posts from a subreddit or user profile.
+
+    Supports two access modes:
+    - **Public** (no OAuth): Pass ``subreddit`` or ``username`` in credentials.
+      Uses the unauthenticated JSON API — no app registration required.
+      Rate limit: ~10 requests/minute.
+    - **OAuth** (higher rate limits): Also pass ``client_id`` and
+      ``client_secret`` from reddit.com/prefs/apps. No user password needed
+      for public profiles. Rate limit: 60 requests/minute.
+
+    Args:
+        limit (int): Maximum number of posts to fetch. Default 50.
+            Ignored when months is set.
+        months (int): If set, fetch all posts from the last N months.
+        credentials (dict): Dict with access info. Keys:
+            - ``subreddit`` (str): Subreddit name, e.g. ``"MachineLearning"``
+              or ``"r/MachineLearning"`` (the ``r/`` prefix is stripped).
+            - ``username`` (str): Reddit username, e.g. ``"chrissoria"``
+              or ``"u/chrissoria"`` (the ``u/`` prefix is stripped).
+            - ``client_id`` (str): OAuth app client ID (optional).
+            - ``client_secret`` (str): OAuth app client secret (optional).
+            Falls back to env vars: REDDIT_SUBREDDIT, REDDIT_USERNAME,
+            REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET.
+
+    Returns:
+        pd.DataFrame with columns:
+            post_id, timestamp, media_type, text, image_url,
+            likes, replies, reposts, quotes, views, shares
+        (quotes, views, shares are always 0 — not exposed by Reddit's API)
+
+    Examples:
+        >>> # Public subreddit (no credentials needed)
+        >>> df = fetch_reddit(limit=25, credentials={"subreddit": "MachineLearning"})
+
+        >>> # Public user profile (no credentials needed)
+        >>> df = fetch_reddit(limit=50, credentials={"username": "chrissoria"})
+
+        >>> # OAuth for higher rate limits
+        >>> df = fetch_reddit(
+        ...     limit=200,
+        ...     credentials={
+        ...         "username": "chrissoria",
+        ...         "client_id": "abc123",
+        ...         "client_secret": "xyz789",
+        ...     },
+        ... )
+    """
+    creds = _load_reddit_credentials(credentials)
+    has_oauth = "client_id" in creds and "client_secret" in creds
+
+    raw_username = creds.get("username", "")
+    raw_subreddit = creds.get("subreddit", "")
+    username = (raw_username[2:] if raw_username.startswith("u/") else raw_username).strip()
+    subreddit = (raw_subreddit[2:] if raw_subreddit.startswith("r/") else raw_subreddit).strip()
+
+    if not username and not subreddit:
+        raise ValueError(
+            "Reddit: provide 'subreddit' or 'username' in sm_credentials.\n"
+            "  Subreddit:   sm_credentials={'subreddit': 'MachineLearning'}\n"
+            "  User posts:  sm_credentials={'username': 'chrissoria'}\n"
+            "  OAuth:       also add 'client_id' and 'client_secret'"
+        )
+
+    headers = {"User-Agent": _REDDIT_USER_AGENT}
+
+    if has_oauth:
+        token = _reddit_oauth_token(creds["client_id"], creds["client_secret"])
+        headers["Authorization"] = f"Bearer {token}"
+        base = _REDDIT_OAUTH_URL
+        url = (
+            f"{base}/user/{username}/submitted"
+            if username
+            else f"{base}/r/{subreddit}/new"
+        )
+    else:
+        url = (
+            f"{_REDDIT_BASE_URL}/user/{username}/submitted.json"
+            if username
+            else f"{_REDDIT_BASE_URL}/r/{subreddit}/new.json"
+        )
+
+    rows = _reddit_paginate(url, headers, limit=limit, months=months)
+    if not rows:
+        return pd.DataFrame(
+            columns=["post_id", "timestamp", "media_type", "text", "image_url",
+                     "likes", "replies", "reposts", "quotes", "views", "shares"]
+        )
+    return pd.DataFrame(rows)
+
+
 # Dispatcher — extend this dict as new platforms are added
 _FETCHERS = {
     "threads": fetch_threads,
     "bluesky": fetch_bluesky,
+    "reddit":  fetch_reddit,
 }
 
 SUPPORTED_SOURCES = list(_FETCHERS.keys())
 
 
-def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
+def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, credentials: dict = None, handle: str = None) -> pd.DataFrame:
     """
     Fetch feed data from a social media platform.
 
@@ -310,6 +551,9 @@ def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, cred
         limit (int): Number of posts/items to fetch. Ignored when months is set.
         months (int): If set, fetch all posts from the last N months.
         credentials (dict): Platform-specific credentials. Falls back to env vars.
+        handle (str): Bluesky only. Handle of the account to fetch posts from
+            (e.g. "user.bsky.social"). When omitted, fetches the authenticated
+            user's own posts.
 
     Returns:
         pd.DataFrame with a 'text' column (the feed content) plus
@@ -321,4 +565,6 @@ def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, cred
             f"sm_source='{sm_source}' is not supported. "
             f"Supported sources: {SUPPORTED_SOURCES}"
         )
+    if key == "bluesky":
+        return fetch_bluesky(limit=limit, months=months, credentials=credentials, handle=handle)
     return _FETCHERS[key](limit=limit, months=months, credentials=credentials)

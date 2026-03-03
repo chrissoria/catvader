@@ -67,6 +67,7 @@ def classify(
     sm_limit: int = 50,
     sm_months: int = None,
     sm_credentials: dict = None,
+    sm_handle: str = None,
     sm_timezone: str = "UTC",
     # Social media context fields — injected into the classification prompt
     platform: str = None,
@@ -141,13 +142,17 @@ def classify(
         sm_source (str): Social media platform to pull feed data from.
             When set, input_data is fetched automatically and engagement
             metrics are included in the output DataFrame.
-            Supported: "threads"
+            Supported: "threads", "bluesky", "reddit"
         sm_limit (int): Number of posts to fetch. Default 50.
             Ignored when sm_months is set.
         sm_months (int): If set, fetch all posts from the last N months
             instead of using sm_limit. E.g. sm_months=12 for one year.
         sm_credentials (dict): Platform credentials. Falls back to env vars.
-            For Threads: {"access_token": "...", "user_id": "..."}
+            For Threads:  {"access_token": "...", "user_id": "..."}
+            For Bluesky:  {"handle": "...", "app_password": "..."}
+            For Reddit (public subreddit):   {"subreddit": "MachineLearning"}
+            For Reddit (public user posts):  {"username": "chrissoria"}
+            For Reddit (OAuth, higher limits): add "client_id" + "client_secret"
         sm_timezone (str): Timezone for the 'day' and 'month' output columns.
             Default "UTC". Use any pytz/IANA string, e.g. "America/Los_Angeles",
             "America/New_York", "Europe/London".
@@ -242,8 +247,9 @@ def classify(
             raise ValueError(
                 "Pass either input_data or sm_source, not both."
             )
-        print(f"[CatVader] Fetching feed from '{sm_source}' (limit={sm_limit})...")
-        _sm_df = fetch_social_media(sm_source, limit=sm_limit, months=sm_months, credentials=sm_credentials)
+        target = sm_handle or "your account"
+        print(f"[CatVader] Fetching feed from '{sm_source}' ({target}, limit={sm_limit})...")
+        _sm_df = fetch_social_media(sm_source, limit=sm_limit, months=sm_months, credentials=sm_credentials, handle=sm_handle)
         input_data = _sm_df["text"].tolist()
         print(f"[CatVader] Fetched {len(input_data)} posts.")
         if not feed_question:
