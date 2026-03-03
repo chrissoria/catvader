@@ -1189,13 +1189,334 @@ def fetch_youtube(
     return pd.DataFrame(rows)
 
 
+# =============================================================================
+# LinkedIn
+# =============================================================================
+
+_LINKEDIN_AUTH_URL      = "https://www.linkedin.com/oauth/v2/authorization"
+_LINKEDIN_TOKEN_URL     = "https://www.linkedin.com/oauth/v2/accessToken"
+_LINKEDIN_API_BASE      = "https://api.linkedin.com/v2"
+_LINKEDIN_REDIRECT_PORT = 8765
+_LINKEDIN_REDIRECT_URI  = f"http://localhost:{_LINKEDIN_REDIRECT_PORT}/callback"
+_LINKEDIN_SCOPES        = "r_liteprofile r_member_social"
+
+
+def _save_env_var(key: str, value: str) -> None:
+    """Append or update a KEY="value" line in the project .env file."""
+    lines = []
+    found = False
+    if os.path.exists(_ENV_PATH):
+        with open(_ENV_PATH, "r") as fh:
+            lines = fh.readlines()
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = f'{key}="{value}"\n'
+                found = True
+                break
+    if not found:
+        lines.append(f'{key}="{value}"\n')
+    with open(_ENV_PATH, "w") as fh:
+        fh.writelines(lines)
+
+
+def _linkedin_oauth_flow(client_id: str, client_secret: str) -> str:
+    """Open a browser for LinkedIn OAuth 2.0 and return an access token."""
+    import secrets as _secrets
+    import threading
+    import webbrowser
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs, urlencode, urlparse as _urlparse
+
+    state = _secrets.token_urlsafe(16)
+    _result: dict = {}
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            qs = parse_qs(_urlparse(self.path).query)
+            if "code" in qs:
+                _result["code"] = qs["code"][0]
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(
+                b"<h2>LinkedIn authorization complete.</h2>"
+                b"<p>You can close this tab and return to your terminal.</p>"
+            )
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+        def log_message(self, *args):
+            pass  # suppress request logs
+
+    auth_url = (
+        _LINKEDIN_AUTH_URL
+        + "?"
+        + urlencode({
+            "response_type": "code",
+            "client_id":     client_id,
+            "redirect_uri":  _LINKEDIN_REDIRECT_URI,
+            "scope":         _LINKEDIN_SCOPES,
+            "state":         state,
+        })
+    )
+
+    print(
+        f"\n[LinkedIn] Opening browser for OAuth authorization...\n"
+        f"  If it doesn't open automatically, visit:\n  {auth_url}\n"
+    )
+    webbrowser.open(auth_url)
+
+    server = HTTPServer(("localhost", _LINKEDIN_REDIRECT_PORT), _Handler)
+    server.serve_forever()  # blocks until handler calls shutdown()
+
+    if "code" not in _result:
+        raise RuntimeError(
+            "LinkedIn OAuth failed: no authorization code received.\n"
+            "Make sure the redirect URI in your LinkedIn app settings is:\n"
+            f"  {_LINKEDIN_REDIRECT_URI}"
+        )
+
+    r = requests.post(
+        _LINKEDIN_TOKEN_URL,
+        data={
+            "grant_type":   "authorization_code",
+            "code":         _result["code"],
+            "redirect_uri": _LINKEDIN_REDIRECT_URI,
+            "client_id":    client_id,
+            "client_secret": client_secret,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    r.raise_for_status()
+    token_data = r.json()
+    access_token = token_data.get("access_token")
+    if not access_token:
+        raise RuntimeError(f"LinkedIn token exchange failed: {token_data}")
+    return access_token
+
+
+def _load_linkedin_credentials(credentials: dict = None) -> str:
+    """Return a valid LinkedIn access token.
+
+    On first run (no stored token), opens a browser OAuth flow and saves
+    the resulting token to the project .env file.
+    """
+    load_dotenv(_ENV_PATH, override=True)
+    creds = dict(credentials or {})
+
+    client_id     = creds.get("client_id")     or os.getenv("LINKEDIN_CLIENT_ID")
+    client_secret = creds.get("client_secret") or os.getenv("LINKEDIN_CLIENT_SECRET")
+    access_token  = creds.get("access_token")  or os.getenv("LINKEDIN_ACCESS_TOKEN")
+
+    if not client_id or not client_secret:
+        raise ValueError(
+            "LinkedIn requires a client_id and client_secret.\n"
+            "  1. Register an app at https://www.linkedin.com/developers/apps\n"
+            "  2. Add the 'Share on LinkedIn' and 'Sign In with LinkedIn' products\n"
+            "     (grants r_liteprofile + r_member_social scopes)\n"
+            f"  3. Add to {_ENV_PATH}:\n"
+            "       LINKEDIN_CLIENT_ID=\"your-client-id\"\n"
+            "       LINKEDIN_CLIENT_SECRET=\"your-client-secret\"\n"
+            f"  4. Set redirect URI to: {_LINKEDIN_REDIRECT_URI}\n"
+            "     in your app's OAuth 2.0 settings on the LinkedIn Developer Portal."
+        )
+
+    if not access_token:
+        print("[LinkedIn] No access token found — starting OAuth flow...")
+        access_token = _linkedin_oauth_flow(client_id, client_secret)
+        _save_env_var("LINKEDIN_ACCESS_TOKEN", access_token)
+        print(f"[LinkedIn] Access token saved to {_ENV_PATH} (valid ~60 days).")
+
+    return access_token
+
+
+def _linkedin_headers(access_token: str) -> dict:
+    return {
+        "Authorization":              f"Bearer {access_token}",
+        "X-Restli-Protocol-Version":  "2.0.0",
+        "LinkedIn-Version":           "202304",
+    }
+
+
+def _linkedin_media_type(post: dict) -> str:
+    specific = post.get("specificContent", {})
+    share    = specific.get("com.linkedin.ugc.ShareContent", {})
+    category = share.get("shareMediaCategory", "NONE")
+    if category == "IMAGE":
+        return "IMAGE"
+    if category == "VIDEO":
+        return "VIDEO"
+    if category == "ARTICLE":
+        return "ARTICLE"
+    return "TEXT_POST"
+
+
+def _linkedin_extract_text(post: dict) -> str:
+    specific   = post.get("specificContent", {})
+    share      = specific.get("com.linkedin.ugc.ShareContent", {})
+    commentary = share.get("shareCommentary", {})
+    return commentary.get("text", "")
+
+
+def _linkedin_extract_image_url(post: dict) -> str:
+    specific   = post.get("specificContent", {})
+    share      = specific.get("com.linkedin.ugc.ShareContent", {})
+    media_list = share.get("media", [])
+    if not media_list:
+        return ""
+    first      = media_list[0]
+    thumbnails = first.get("thumbnails", [])
+    if thumbnails:
+        return thumbnails[0].get("url", "")
+    return first.get("originalUrl", "")
+
+
+def _linkedin_social_actions(post_urn: str, headers: dict, delay: float = 0.3) -> tuple:
+    """Fetch (likes, comments) for a single post URN. Returns (0, 0) on error."""
+    from urllib.parse import quote
+    time.sleep(delay)
+    encoded = quote(post_urn, safe="")
+    r = requests.get(
+        f"{_LINKEDIN_API_BASE}/socialActions/{encoded}",
+        headers=headers,
+    )
+    if r.status_code != 200:
+        return 0, 0
+    data     = r.json()
+    likes    = data.get("likesSummary",    {}).get("totalLikes",              0)
+    comments = data.get("commentsSummary", {}).get("totalFirstLevelComments", 0)
+    return likes, comments
+
+
+def fetch_linkedin(limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
+    """
+    Fetch your own LinkedIn posts with engagement metrics.
+
+    On first run, opens a browser window for OAuth 2.0 authorization and
+    saves the access token to your .env file (valid ~60 days).
+
+    Args:
+        limit (int): Maximum number of posts to fetch. Default 50.
+            Ignored when months is set.
+        months (int): If set, fetch all posts from the last N months.
+        credentials (dict): Optional. Keys:
+            - 'client_id', 'client_secret': LinkedIn OAuth app credentials.
+              Falls back to LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET env vars.
+            - 'access_token': Use a pre-existing token and skip the OAuth flow.
+              Falls back to LINKEDIN_ACCESS_TOKEN env var.
+
+    Returns:
+        pd.DataFrame with columns:
+            post_id, timestamp, media_type, text, image_url,
+            likes, replies, reposts, quotes, views, shares
+        (reposts, quotes, views, shares are 0 — not exposed by LinkedIn's API)
+
+    Notes:
+        - Only your own posts are accessible via the personal LinkedIn API.
+          Cross-account analysis is not supported.
+        - Engagement metrics require one API call per post (~0.3 s/post).
+        - If you see a 401 error, your token has expired (~60 days). Delete
+          LINKEDIN_ACCESS_TOKEN from your .env and re-run to re-authorize.
+    """
+    from urllib.parse import quote
+
+    access_token = _load_linkedin_credentials(credentials)
+    headers      = _linkedin_headers(access_token)
+
+    # Resolve the current user's person ID
+    r = requests.get(f"{_LINKEDIN_API_BASE}/me", headers=headers)
+    if r.status_code == 401:
+        raise RuntimeError(
+            "LinkedIn access token is invalid or expired.\n"
+            f"Delete LINKEDIN_ACCESS_TOKEN from {_ENV_PATH} and re-run to re-authorize."
+        )
+    r.raise_for_status()
+    person_id  = r.json()["id"]
+    author_urn = f"urn:li:person:{person_id}"
+
+    cutoff    = None
+    if months is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    rows      = []
+    start     = 0
+    page_size = min(limit if months is None else 50, 50)
+
+    while True:
+        encoded_urn = quote(author_urn, safe="")
+        params = {
+            "q":       "authors",
+            "authors": f"List({encoded_urn})",
+            "count":   page_size,
+            "start":   start,
+            "sortBy":  "LAST_MODIFIED",
+        }
+        r = requests.get(
+            f"{_LINKEDIN_API_BASE}/ugcPosts",
+            headers=headers,
+            params=params,
+        )
+        if r.status_code == 401:
+            raise RuntimeError(
+                "LinkedIn access token expired.\n"
+                f"Delete LINKEDIN_ACCESS_TOKEN from {_ENV_PATH} and re-run."
+            )
+        r.raise_for_status()
+        body     = r.json()
+        elements = body.get("elements", [])
+        if not elements:
+            break
+
+        for post in elements:
+            created_ms = post.get("created", {}).get("time", 0)
+            ts_str = (
+                datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc).isoformat()
+                if created_ms else ""
+            )
+
+            if cutoff and ts_str:
+                ts = datetime.fromisoformat(ts_str)
+                if ts < cutoff:
+                    return pd.DataFrame(rows)
+
+            post_urn       = post.get("id", "")
+            likes, replies = _linkedin_social_actions(post_urn, headers) if post_urn else (0, 0)
+
+            rows.append({
+                "post_id":    post_urn,
+                "timestamp":  ts_str,
+                "media_type": _linkedin_media_type(post),
+                "text":       _linkedin_extract_text(post),
+                "image_url":  _linkedin_extract_image_url(post),
+                "likes":      likes,
+                "replies":    replies,
+                "reposts":    0,
+                "quotes":     0,
+                "views":      0,
+                "shares":     0,
+            })
+
+            if months is None and len(rows) >= limit:
+                return pd.DataFrame(rows)
+
+        paging = body.get("paging", {})
+        total  = paging.get("total", 0)
+        start += page_size
+        if start >= total or len(elements) < page_size:
+            break
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame(
+        columns=["post_id", "timestamp", "media_type", "text", "image_url",
+                 "likes", "replies", "reposts", "quotes", "views", "shares"]
+    )
+
+
 # Dispatcher — extend this dict as new platforms are added
 _FETCHERS = {
-    "threads":  fetch_threads,
-    "bluesky":  fetch_bluesky,
-    "reddit":   fetch_reddit,
-    "mastodon": fetch_mastodon,
-    "youtube":  fetch_youtube,
+    "threads":   fetch_threads,
+    "bluesky":   fetch_bluesky,
+    "reddit":    fetch_reddit,
+    "mastodon":  fetch_mastodon,
+    "youtube":   fetch_youtube,
+    "linkedin":  fetch_linkedin,
 }
 
 SUPPORTED_SOURCES = list(_FETCHERS.keys())
@@ -1218,7 +1539,7 @@ def fetch_social_media(
 
     Args:
         sm_source (str): Platform name. Supported: "threads", "bluesky", "reddit",
-            "mastodon", "youtube".
+            "mastodon", "youtube", "linkedin".
         limit (int): Number of posts/items to fetch. Ignored when months or days is set.
             For YouTube "comments" mode, interpreted as number of videos to pull
             comments from.

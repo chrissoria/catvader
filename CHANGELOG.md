@@ -11,6 +11,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.12.0] - 2026-03-03
+
+### Added
+- **LinkedIn support** via `sm_source="linkedin"`.
+  - Browser-based OAuth 2.0 flow: on first run, opens a browser window for authorization and auto-saves the access token to your `.env` file (valid ~60 days).
+  - Requires `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET` from a registered LinkedIn Developer app with redirect URI `http://localhost:8765/callback`.
+  - Fetches own posts via `/v2/ugcPosts?q=authors` with per-post engagement (likes, comments) via `/v2/socialActions/{urn}`.
+  - `_save_env_var()` helper: updates or appends key/value pairs to the project `.env` file.
+  - Cross-account analysis not supported by LinkedIn's personal API.
+
+---
+
 ## [1.11.0] - 2026-03-02
 
 ### Added
