@@ -451,5 +451,8 @@ def classify(
         # Flag reposts
         if "media_type" in _sm_df.columns:
             result["is_repost"] = (_sm_df["media_type"].str.upper().str.contains("REPOST", na=False)).astype(int).values
+        # Post length in characters
+        if "text" in _sm_df.columns:
+            result["post_length"] = _sm_df["text"].fillna("").str.len().values
 
     return result
