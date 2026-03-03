@@ -6,12 +6,12 @@ Usage via classify():
     classify(
         feed_input=None,          # omit when using sm_source
         categories=[...],
-        sm_source="threads",      # platform to pull from
+        sm_source="threads",      # platform to pull from ("threads" or "bluesky")
         sm_limit=50,              # number of posts to fetch
         sm_credentials={...},     # optional; falls back to env vars
     )
 
-Supported sources: "threads"
+Supported sources: "threads", "bluesky"
 """
 
 import os
@@ -155,9 +155,147 @@ def fetch_threads(limit: int = 50, months: int = None, credentials: dict = None)
     return pd.DataFrame(rows)
 
 
+_BLUESKY_BASE_URL = "https://bsky.social/xrpc"
+
+
+def _load_bluesky_credentials(credentials: dict = None) -> tuple[str, str]:
+    """Return (handle, app_password), preferring explicit credentials dict."""
+    load_dotenv(_ENV_PATH, override=True)
+    handle = (credentials or {}).get("handle") or os.getenv("BLUESKY_HANDLE")
+    password = (credentials or {}).get("app_password") or os.getenv("BLUESKY_APP_PASSWORD")
+    if not handle:
+        raise ValueError(
+            "No Bluesky handle found. Pass sm_credentials={'handle': '...'} "
+            f"or set BLUESKY_HANDLE in {_ENV_PATH}"
+        )
+    if not password:
+        raise ValueError(
+            "No Bluesky app password found. Pass sm_credentials={'app_password': '...'} "
+            f"or set BLUESKY_APP_PASSWORD in {_ENV_PATH}"
+        )
+    return handle, password
+
+
+def _bluesky_create_session(handle: str, password: str) -> dict:
+    """Authenticate with Bluesky and return session dict (accessJwt, did)."""
+    r = requests.post(
+        f"{_BLUESKY_BASE_URL}/com.atproto.server.createSession",
+        json={"identifier": handle, "password": password},
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _bluesky_extract_image_url(post: dict) -> str:
+    """Extract first image URL from a Bluesky post embed."""
+    embed = post.get("embed", {})
+    embed_type = embed.get("$type", "")
+    if "images" in embed_type:
+        images = embed.get("images", [])
+        if images:
+            return images[0].get("fullsize") or images[0].get("thumb", "")
+    if "recordWithMedia" in embed_type:
+        media = embed.get("media", {})
+        images = media.get("images", [])
+        if images:
+            return images[0].get("fullsize") or images[0].get("thumb", "")
+    return ""
+
+
+def _bluesky_media_type(item: dict) -> str:
+    """Derive a media_type string comparable to Threads media_type."""
+    if item.get("reason", {}).get("$type", "").endswith("reasonRepost"):
+        return "REPOST_FACADE"
+    embed_type = item.get("post", {}).get("embed", {}).get("$type", "")
+    if "images" in embed_type or "recordWithMedia" in embed_type:
+        return "IMAGE"
+    if "video" in embed_type:
+        return "VIDEO"
+    return "TEXT_POST"
+
+
+def fetch_bluesky(limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
+    """
+    Fetch recent Bluesky posts with engagement metrics.
+
+    Args:
+        limit (int): Maximum number of posts to fetch. Default 50.
+            Ignored when months is set.
+        months (int): If set, only return posts from the last N months.
+        credentials (dict): Optional dict with keys 'handle' and 'app_password'.
+            Falls back to BLUESKY_HANDLE / BLUESKY_APP_PASSWORD env vars.
+
+    Returns:
+        pd.DataFrame with columns:
+            post_id, timestamp, media_type, text, image_url,
+            likes, replies, reposts, quotes, views, shares
+        (views and shares are 0 — not exposed by the Bluesky API)
+    """
+    handle, password = _load_bluesky_credentials(credentials)
+    session = _bluesky_create_session(handle, password)
+    access_token = session["accessJwt"]
+    actor = session["did"]
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    cutoff = None
+    if months is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    rows = []
+    cursor = None
+    page_size = min(limit if months is None else 100, 100)
+
+    while True:
+        params = {"actor": actor, "limit": page_size}
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get(
+            f"{_BLUESKY_BASE_URL}/app.bsky.feed.getAuthorFeed",
+            headers=headers,
+            params=params,
+        )
+        r.raise_for_status()
+        body = r.json()
+        feed = body.get("feed", [])
+
+        for item in feed:
+            post = item.get("post", {})
+            record = post.get("record", {})
+            ts_str = record.get("createdAt", post.get("indexedAt", ""))
+
+            if cutoff and ts_str:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                if ts < cutoff:
+                    return pd.DataFrame(rows)
+
+            rows.append({
+                "post_id":    post.get("uri", ""),
+                "timestamp":  ts_str,
+                "media_type": _bluesky_media_type(item),
+                "text":       record.get("text", ""),
+                "image_url":  _bluesky_extract_image_url(post),
+                "likes":      post.get("likeCount", 0),
+                "replies":    post.get("replyCount", 0),
+                "reposts":    post.get("repostCount", 0),
+                "quotes":     post.get("quoteCount", 0),
+                "views":      0,
+                "shares":     0,
+            })
+
+            if months is None and len(rows) >= limit:
+                return pd.DataFrame(rows)
+
+        cursor = body.get("cursor")
+        if not cursor or not feed:
+            break
+
+    return pd.DataFrame(rows)
+
+
 # Dispatcher — extend this dict as new platforms are added
 _FETCHERS = {
     "threads": fetch_threads,
+    "bluesky": fetch_bluesky,
 }
 
 SUPPORTED_SOURCES = list(_FETCHERS.keys())
@@ -168,7 +306,7 @@ def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, cred
     Fetch feed data from a social media platform.
 
     Args:
-        sm_source (str): Platform name. Currently supported: "threads".
+        sm_source (str): Platform name. Currently supported: "threads", "bluesky".
         limit (int): Number of posts/items to fetch. Ignored when months is set.
         months (int): If set, fetch all posts from the last N months.
         credentials (dict): Platform-specific credentials. Falls back to env vars.

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025-present Christopher Soria <chrissoria@berkeley.edu>
 #
 # SPDX-License-Identifier: MIT
-__version__ = "1.7.1"
+__version__ = "1.8.0"
 __author__ = "Chris Soria"
 __email__ = "chrissoria@berkeley.edu"
 __title__ = "cat-vader"
