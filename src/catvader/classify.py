@@ -448,5 +448,8 @@ def classify(
             result["hour"] = ts.dt.hour.values
             date_only = ts.dt.date
             result["n_posts_that_day"] = date_only.map(date_only.value_counts()).values
+        # Flag reposts
+        if "media_type" in _sm_df.columns:
+            result["is_repost"] = (_sm_df["media_type"].str.upper().str.contains("REPOST", na=False)).astype(int).values
 
     return result
