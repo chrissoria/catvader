@@ -446,5 +446,7 @@ def classify(
             result["day"] = ts.dt.day_name().values
             result["month"] = ts.dt.month_name().values
             result["hour"] = ts.dt.hour.values
+            date_only = ts.dt.date
+            result["n_posts_that_day"] = date_only.map(date_only.value_counts()).values
 
     return result
