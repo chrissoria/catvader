@@ -125,7 +125,7 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 - `input_data`: The data to classify (text list/Series, image paths, or PDF paths). Omit when using `sm_source`.
 - `categories` (list): List of category names for classification. Use `"auto"` to discover categories automatically.
 - `api_key` (str): API key for the LLM service (single-model mode)
-- `sm_source` (str, optional): Social media platform to pull posts from automatically. Supported: `"threads"`, `"bluesky"`, `"reddit"`, `"mastodon"`, `"youtube"`. When set, `input_data` is fetched and does not need to be provided.
+- `sm_source` (str, optional): Social media platform to pull posts from automatically. Supported: `"threads"`, `"bluesky"`, `"reddit"`, `"mastodon"`, `"youtube"`, `"linkedin"`. When set, `input_data` is fetched and does not need to be provided.
 - `sm_limit` (int, default=`50`): Number of posts/videos to fetch. For YouTube comments mode, number of videos to pull comments from.
 - `sm_months` (int, optional): Fetch all posts from the last N months instead of using `sm_limit`.
 - `sm_days` (int, optional): Fetch all posts from the last N days (overrides `sm_months`).
@@ -136,6 +136,8 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 - `sm_youtube_transcript` (bool, default=`False`): YouTube video mode only. Use the auto-generated transcript as the `text` column instead of the description. Falls back to description if unavailable. Requires `pip install youtube-transcript-api`.
 - `sm_youtube_transcript_max_chars` (int, default=`10_000`): Max characters from the transcript. Set to `None` for the full transcript (can be 100k+ chars for long videos).
 - `sm_comments_per_video` (int, default=`20`): YouTube comments mode only. Max top-level comments per video.
+
+**LinkedIn credentials** (`sm_source="linkedin"`): On first run, a browser window opens for OAuth 2.0 authorization and the token is saved to your `.env` automatically (valid ~60 days). Requires `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET` from a [LinkedIn Developer app](https://www.linkedin.com/developers/apps) with redirect URI `http://localhost:8765/callback`. Only your own posts are accessible via the personal LinkedIn API.
 - `platform` (str, optional): Social media platform label (e.g., `"Twitter/X"`, `"Reddit"`, `"TikTok"`). Injected into the classification prompt as context.
 - `handle` (str, optional): Author handle (e.g., `"@username"`, `"r/subreddit"`). Injected into prompt.
 - `hashtags` (str or list, optional): Hashtags associated with the posts. Injected into prompt.
@@ -271,6 +273,15 @@ results = cat.classify(
     sm_comments_per_video=50,
     sm_credentials={"api_key": youtube_api_key},
     categories=["Supportive", "Critical", "Humorous", "Off-topic"],
+    api_key=api_key
+)
+
+# LinkedIn — classify your own posts (browser OAuth on first run)
+results = cat.classify(
+    sm_source="linkedin",
+    sm_limit=50,
+    sm_credentials={"client_id": "...", "client_secret": "..."},
+    categories=["Thought Leadership", "Job/Hiring", "Product Announcement", "Personal", "Other"],
     api_key=api_key
 )
 
