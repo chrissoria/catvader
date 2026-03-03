@@ -7,6 +7,7 @@ supporting both single-model and multi-model (ensemble) classification.
 
 import warnings
 from typing import Union, Callable
+import pandas as pd
 
 from ._social_media import fetch_social_media, SUPPORTED_SOURCES
 
@@ -433,5 +434,10 @@ def classify(
         result = result.reset_index(drop=True)
         for col in metric_cols:
             result[col] = _sm_df[col].values
+        # Derive day-of-week and month name from timestamp
+        if "timestamp" in _sm_df.columns:
+            ts = pd.to_datetime(_sm_df["timestamp"], utc=True, errors="coerce")
+            result["day"] = ts.dt.day_name().values
+            result["month"] = ts.dt.month_name().values
 
     return result
