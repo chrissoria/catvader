@@ -15,6 +15,7 @@ Supported sources: "threads", "bluesky", "reddit"
 """
 
 import os
+import time
 import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -368,8 +369,29 @@ def _reddit_media_type(post: dict) -> str:
     return "LINK"
 
 
+def _reddit_estimate_votes(score: int, ratio: float) -> tuple:
+    """
+    Estimate raw upvotes and downvotes from net score and upvote ratio.
+
+    Reddit only exposes the net score (upvotes - downvotes) and the ratio
+    (upvotes / total votes). From these we can derive approximate counts.
+    Reddit fuzzes both values slightly to prevent brigading, so results
+    are estimates, not exact figures.
+
+    Returns (upvotes_raw, downvotes_est) as ints.
+    """
+    if ratio is None or score is None:
+        return 0, 0
+    denom = 2 * ratio - 1
+    if abs(denom) < 0.01:   # ratio ~0.5 — can't reliably estimate
+        return max(0, score), 0
+    upvotes = round(score * ratio / denom)
+    downvotes = max(0, upvotes - score)
+    return max(0, upvotes), downvotes
+
+
 def _reddit_post_to_row(post: dict) -> dict:
-    """Convert a Reddit API post object to the standard 11-column row dict."""
+    """Convert a Reddit API post object to the standard row dict."""
     title = post.get("title", "")
     selftext = post.get("selftext", "")
     if selftext in ("[deleted]", "[removed]"):
@@ -383,31 +405,52 @@ def _reddit_post_to_row(post: dict) -> dict:
         else ""
     )
 
+    score = post.get("score", 0)
+    ratio = post.get("upvote_ratio")
+    upvotes_raw, downvotes_est = _reddit_estimate_votes(score, ratio)
+
     return {
-        "post_id":    f"t3_{post.get('id', '')}",
-        "timestamp":  ts_str,
-        "media_type": _reddit_media_type(post),
-        "text":       text,
-        "image_url":  _reddit_extract_image_url(post),
-        "likes":      post.get("score", 0),
-        "replies":    post.get("num_comments", 0),
-        "reposts":    post.get("num_crossposts", 0),
-        "quotes":     0,
-        "views":      0,
-        "shares":     0,
+        "post_id":        f"t3_{post.get('id', '')}",
+        "timestamp":      ts_str,
+        "media_type":     _reddit_media_type(post),
+        "text":           text,
+        "image_url":      _reddit_extract_image_url(post),
+        "likes":          score,
+        "replies":        post.get("num_comments", 0),
+        "reposts":        post.get("num_crossposts", 0),
+        "quotes":         0,
+        "views":          0,
+        "shares":         0,
+        "upvote_ratio":   ratio if ratio is not None else 0.0,
+        "upvotes_raw":    upvotes_raw,
+        "downvotes_est":  downvotes_est,
     }
 
 
-def _reddit_paginate(url: str, headers: dict, limit: int, months: int = None) -> list:
-    """Paginate a Reddit listing endpoint and return post rows."""
+def _reddit_paginate(url: str, headers: dict, limit: int, months: int = None, days: int = None, request_delay: float = 6.0) -> list:
+    """Paginate a Reddit listing endpoint and return post rows.
+
+    Args:
+        days: If set, fetch posts from the last N days (overrides months).
+        request_delay: Seconds to sleep between paginated requests.
+            Default 6.0 (10 req/min, safe for unauthenticated access).
+            Pass 1.0 for OAuth (60 req/min).
+    """
     cutoff = None
-    if months is not None:
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    elif months is not None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
 
     rows = []
     after = None
+    first_request = True
 
     while True:
+        if not first_request:
+            time.sleep(request_delay)
+        first_request = False
+
         params = {"limit": 100, "sort": "new"}
         if after:
             params["after"] = after
@@ -440,7 +483,7 @@ def _reddit_paginate(url: str, headers: dict, limit: int, months: int = None) ->
     return rows
 
 
-def fetch_reddit(limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
+def fetch_reddit(limit: int = 50, months: int = None, days: int = None, credentials: dict = None) -> pd.DataFrame:
     """
     Fetch Reddit posts from a subreddit or user profile.
 
@@ -523,7 +566,8 @@ def fetch_reddit(limit: int = 50, months: int = None, credentials: dict = None) 
             else f"{_REDDIT_BASE_URL}/r/{subreddit}/new.json"
         )
 
-    rows = _reddit_paginate(url, headers, limit=limit, months=months)
+    request_delay = 1.0 if has_oauth else 6.0
+    rows = _reddit_paginate(url, headers, limit=limit, months=months, days=days, request_delay=request_delay)
     if not rows:
         return pd.DataFrame(
             columns=["post_id", "timestamp", "media_type", "text", "image_url",
@@ -542,18 +586,18 @@ _FETCHERS = {
 SUPPORTED_SOURCES = list(_FETCHERS.keys())
 
 
-def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, credentials: dict = None, handle: str = None) -> pd.DataFrame:
+def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, days: int = None, credentials: dict = None, handle: str = None) -> pd.DataFrame:
     """
     Fetch feed data from a social media platform.
 
     Args:
-        sm_source (str): Platform name. Currently supported: "threads", "bluesky".
-        limit (int): Number of posts/items to fetch. Ignored when months is set.
+        sm_source (str): Platform name. Currently supported: "threads", "bluesky", "reddit".
+        limit (int): Number of posts/items to fetch. Ignored when months or days is set.
         months (int): If set, fetch all posts from the last N months.
+        days (int): If set, fetch all posts from the last N days (overrides months).
+            Use days=1 for today's posts.
         credentials (dict): Platform-specific credentials. Falls back to env vars.
-        handle (str): Bluesky only. Handle of the account to fetch posts from
-            (e.g. "user.bsky.social"). When omitted, fetches the authenticated
-            user's own posts.
+        handle (str): Bluesky only. Handle of the account to fetch posts from.
 
     Returns:
         pd.DataFrame with a 'text' column (the feed content) plus
@@ -567,4 +611,6 @@ def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, cred
         )
     if key == "bluesky":
         return fetch_bluesky(limit=limit, months=months, credentials=credentials, handle=handle)
+    if key == "reddit":
+        return fetch_reddit(limit=limit, months=months, days=days, credentials=credentials)
     return _FETCHERS[key](limit=limit, months=months, credentials=credentials)

@@ -66,6 +66,7 @@ def classify(
     sm_source: str = None,
     sm_limit: int = 50,
     sm_months: int = None,
+    sm_days: int = None,
     sm_credentials: dict = None,
     sm_handle: str = None,
     sm_timezone: str = "UTC",
@@ -147,6 +148,9 @@ def classify(
             Ignored when sm_months is set.
         sm_months (int): If set, fetch all posts from the last N months
             instead of using sm_limit. E.g. sm_months=12 for one year.
+        sm_days (int): If set, fetch all posts from the last N days.
+            Overrides sm_months. E.g. sm_days=1 for today's posts.
+            Currently supported for Reddit only.
         sm_credentials (dict): Platform credentials. Falls back to env vars.
             For Threads:  {"access_token": "...", "user_id": "..."}
             For Bluesky:  {"handle": "...", "app_password": "..."}
@@ -247,9 +251,15 @@ def classify(
             raise ValueError(
                 "Pass either input_data or sm_source, not both."
             )
-        target = sm_handle or "your account"
-        print(f"[CatVader] Fetching feed from '{sm_source}' ({target}, limit={sm_limit})...")
-        _sm_df = fetch_social_media(sm_source, limit=sm_limit, months=sm_months, credentials=sm_credentials, handle=sm_handle)
+        if sm_handle:
+            target = sm_handle
+        elif sm_source == "reddit" and sm_credentials:
+            target = sm_credentials.get("subreddit") or sm_credentials.get("username") or "your account"
+        else:
+            target = "your account"
+        window = f"last {sm_days}d" if sm_days else f"last {sm_months}mo" if sm_months else f"limit={sm_limit}"
+        print(f"[CatVader] Fetching feed from '{sm_source}' ({target}, {window})...")
+        _sm_df = fetch_social_media(sm_source, limit=sm_limit, months=sm_months, days=sm_days, credentials=sm_credentials, handle=sm_handle)
         input_data = _sm_df["text"].tolist()
         print(f"[CatVader] Fetched {len(input_data)} posts.")
         if not feed_question:
