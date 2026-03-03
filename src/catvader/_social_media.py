@@ -17,6 +17,7 @@ Supported sources: "threads"
 import os
 import requests
 import pandas as pd
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 _ENV_PATH = os.path.expanduser(
@@ -102,12 +103,15 @@ def _get_threads_insights(token: str, post_id: str) -> dict:
     return {item["name"]: item["values"][0]["value"] for item in data}
 
 
-def fetch_threads(limit: int = 50, credentials: dict = None) -> pd.DataFrame:
+def fetch_threads(limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
     """
     Fetch recent Threads posts with engagement metrics.
 
     Args:
-        limit (int): Number of posts to fetch. Default 50.
+        limit (int): Maximum number of posts to fetch. Default 50.
+            Ignored when months is set (all posts within the window are returned).
+        months (int): If set, only return posts from the last N months.
+            Overrides limit — fetches until the cutoff date is reached.
         credentials (dict): Optional dict with keys 'access_token' and 'user_id'.
             Falls back to THREADS_ACCESS_TOKEN / THREADS_USER_ID env vars.
 
@@ -117,22 +121,36 @@ def fetch_threads(limit: int = 50, credentials: dict = None) -> pd.DataFrame:
             likes, replies, reposts, quotes, views, shares
     """
     token, user_id = _load_threads_credentials(credentials)
-    posts = _get_threads_posts(token, user_id, limit)
+
+    cutoff = None
+    if months is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+        fetch_limit = 1000  # paginate until cutoff
+    else:
+        fetch_limit = limit
+
+    posts = _get_threads_posts(token, user_id, fetch_limit)
+
     rows = []
     for post in posts:
+        ts_str = post.get("timestamp", "")
+        if cutoff and ts_str:
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if ts < cutoff:
+                break  # posts are newest-first; stop once past the window
         metrics = _get_threads_insights(token, post["id"])
         rows.append({
-            "post_id":   post["id"],
-            "timestamp": post.get("timestamp"),
+            "post_id":    post["id"],
+            "timestamp":  ts_str,
             "media_type": post.get("media_type", ""),
-            "text":      post.get("text", ""),
-            "image_url": _extract_image_url(post),
-            "likes":     metrics.get("likes", 0),
-            "replies":   metrics.get("replies", 0),
-            "reposts":   metrics.get("reposts", 0),
-            "quotes":    metrics.get("quotes", 0),
-            "views":     metrics.get("views", 0),
-            "shares":    metrics.get("shares", 0),
+            "text":       post.get("text", ""),
+            "image_url":  _extract_image_url(post),
+            "likes":      metrics.get("likes", 0),
+            "replies":    metrics.get("replies", 0),
+            "reposts":    metrics.get("reposts", 0),
+            "quotes":     metrics.get("quotes", 0),
+            "views":      metrics.get("views", 0),
+            "shares":     metrics.get("shares", 0),
         })
     return pd.DataFrame(rows)
 
@@ -145,13 +163,14 @@ _FETCHERS = {
 SUPPORTED_SOURCES = list(_FETCHERS.keys())
 
 
-def fetch_social_media(sm_source: str, limit: int = 50, credentials: dict = None) -> pd.DataFrame:
+def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, credentials: dict = None) -> pd.DataFrame:
     """
     Fetch feed data from a social media platform.
 
     Args:
         sm_source (str): Platform name. Currently supported: "threads".
-        limit (int): Number of posts/items to fetch.
+        limit (int): Number of posts/items to fetch. Ignored when months is set.
+        months (int): If set, fetch all posts from the last N months.
         credentials (dict): Platform-specific credentials. Falls back to env vars.
 
     Returns:
@@ -164,4 +183,4 @@ def fetch_social_media(sm_source: str, limit: int = 50, credentials: dict = None
             f"sm_source='{sm_source}' is not supported. "
             f"Supported sources: {SUPPORTED_SOURCES}"
         )
-    return _FETCHERS[key](limit=limit, credentials=credentials)
+    return _FETCHERS[key](limit=limit, months=months, credentials=credentials)

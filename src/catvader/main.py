@@ -13,7 +13,7 @@ def extract(
     max_categories=12,
     categories_per_chunk=10,
     divisions=12,
-    user_model="gpt-4o",
+    user_model="gpt-5",
     creativity=None,
     specificity="broad",
     research_question=None,
@@ -48,7 +48,7 @@ def extract(
         max_categories (int): Maximum number of final categories to return.
         categories_per_chunk (int): Categories to extract per chunk.
         divisions (int): Number of chunks to divide data into.
-        user_model (str): Model name to use. Default "gpt-4o".
+        user_model (str): Model name to use. Default "gpt-5".
         creativity (float): Temperature setting. None uses model default.
         specificity (str): "broad" or "specific" category granularity.
         research_question (str): Optional research context.

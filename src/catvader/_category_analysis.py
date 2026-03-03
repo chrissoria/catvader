@@ -41,7 +41,7 @@ _SHORT_ONLY_PATTERNS = [
 
 # Top-tier model per provider for the LLM fallback
 _TOP_TIER_MODELS = {
-    "openai": "gpt-4o",
+    "openai": "gpt-5",
     "anthropic": "claude-sonnet-4-5-20250929",
     "google": "gemini-2.5-flash",
     "mistral": "mistral-large-latest",
@@ -136,7 +136,7 @@ def _resolve_provider_and_model(user_model, model_source):
             provider = model_source.lower()
         else:
             provider = "openai"
-        model = _TOP_TIER_MODELS.get(provider, "gpt-4o")
+        model = _TOP_TIER_MODELS.get(provider, "gpt-5")
     return provider, model
 
 

@@ -319,7 +319,7 @@ def explore_corpus(
     specificity="broad",
     categories_per_chunk=10,
     divisions=5,
-    model: str = "gpt-4o",
+    model: str = "gpt-5",
     provider: str = "auto",
     creativity=None,
     filename="corpus_exploration.csv",
@@ -338,7 +338,7 @@ def explore_corpus(
         specificity: "broad" or "specific" categories
         categories_per_chunk: Number of categories to extract per chunk
         divisions: Number of chunks to process
-        model: Model name (e.g., "gpt-4o", "claude-3-haiku-20240307", "gemini-2.5-flash")
+        model: Model name (e.g., "gpt-5", "claude-3-haiku-20240307", "gemini-2.5-flash")
         provider: Provider name or "auto" to detect from model name
         creativity: Temperature setting
         filename: Output CSV filename (None to skip saving)
@@ -476,7 +476,7 @@ def explore_common_categories(
     max_categories: int = 12,
     categories_per_chunk: int = 10,
     divisions: int = 5,
-    model: str = "gpt-4o",
+    model: str = "gpt-5",
     provider: str = "auto",
     creativity: float = None,
     specificity: str = "broad",
@@ -503,7 +503,7 @@ def explore_common_categories(
         max_categories: Maximum number of top categories to return
         categories_per_chunk: Number of categories to extract per chunk
         divisions: Number of chunks to process per iteration
-        model: Model name (e.g., "gpt-4o", "claude-3-haiku-20240307", "gemini-2.5-flash")
+        model: Model name (e.g., "gpt-5", "claude-3-haiku-20240307", "gemini-2.5-flash")
         provider: Provider name or "auto" to detect from model name
         creativity: Temperature setting
         specificity: "broad" or "specific" categories
@@ -747,7 +747,7 @@ def multi_class(
     survey_input,
     categories,
     api_key: str = None,
-    model: str = "gpt-4o",
+    model: str = "gpt-5",
     provider: str = "auto",
     survey_question: str = "",
     example1: str = None,
@@ -782,7 +782,7 @@ def multi_class(
         survey_input: List or Series of text responses to classify
         categories: List of category names, or "auto" to auto-detect categories
         api_key: API key for the LLM provider (not required for Ollama)
-        model: Model name (e.g., "gpt-4o", "claude-sonnet-4-5-20250929", "gemini-2.5-flash",
+        model: Model name (e.g., "gpt-5", "claude-sonnet-4-5-20250929", "gemini-2.5-flash",
                or any Ollama model like "llama3.2", "mistral", "phi3")
         provider: Provider name or "auto" to detect from model name.
                   For local models, use provider="ollama"
@@ -819,7 +819,7 @@ def multi_class(
             survey_input=["I moved for work"],
             categories=["Employment", "Family"],
             api_key="your-api-key",
-            model="gpt-4o",
+            model="gpt-5",
         )
 
     .. deprecated::

@@ -502,9 +502,9 @@ def normalize_model_input(
     Normalize model input to a list of tuples.
 
     Supports three input formats:
-    - Single model: model="gpt-4o", api_key="sk-...", provider="auto"
-    - Single tuple: models=("gpt-4o", "openai", "sk-...")
-    - List of tuples: models=[("gpt-4o", "openai", "sk-..."), ...]
+    - Single model: model="gpt-5", api_key="sk-...", provider="auto"
+    - Single tuple: models=("gpt-5", "openai", "sk-...")
+    - List of tuples: models=[("gpt-5", "openai", "sk-..."), ...]
 
     Args:
         model: Single model name
@@ -519,7 +519,7 @@ def normalize_model_input(
         ValueError: If no model specified
     """
     if models is None and model is not None:
-        # Single model mode: model="gpt-4o", api_key="sk-...", provider="auto"
+        # Single model mode: model="gpt-5", api_key="sk-...", provider="auto"
         return [(model, provider, api_key)]
     elif models is not None:
         # Check if it's a single tuple (not a list of tuples)
@@ -1288,13 +1288,13 @@ def classify_ensemble(
         categories: List of category names, or "auto" to auto-detect categories
 
         # Single model mode (use these for simple single-model classification):
-        model: Model name (e.g., "gpt-4o", "claude-sonnet-4-5-20250929")
+        model: Model name (e.g., "gpt-5", "claude-sonnet-4-5-20250929")
         api_key: API key for the provider
         provider: Provider name or "auto" to detect from model name
 
         # Multi-model mode (use this for ensemble classification):
         models: List of tuples (model_name, provider, api_key), or a single tuple
-            Example: [("gpt-4o", "openai", "sk-..."), ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-...")]
+            Example: [("gpt-5", "openai", "sk-..."), ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-...")]
 
         # Classification parameters:
         survey_question: Context about what question was asked (required for categories="auto")
@@ -1371,7 +1371,7 @@ def classify_ensemble(
         df = multi_class_ensemble(
             survey_input=["I moved for a new job"],
             categories=["Employment", "Family", "Housing"],
-            model="gpt-4o",
+            model="gpt-5",
             api_key="sk-...",
             survey_question="Why did you move?",
         )
@@ -1381,7 +1381,7 @@ def classify_ensemble(
             survey_input=["I moved for a new job"],
             categories=["Employment", "Family", "Housing"],
             models=[
-                ("gpt-4o", "openai", "sk-..."),
+                ("gpt-5", "openai", "sk-..."),
                 ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-..."),
             ],
             survey_question="Why did you move?",
@@ -1392,7 +1392,7 @@ def classify_ensemble(
         df = multi_class_ensemble(
             survey_input="reports/",  # Directory of PDFs
             categories=["Has Chart", "Has Table", "Financial Summary"],
-            model="gpt-4o",
+            model="gpt-5",
             api_key="sk-...",
             pdf_mode="image",
             input_description="Financial reports with charts and tables",
@@ -1403,7 +1403,7 @@ def classify_ensemble(
             survey_input=["doc1.pdf", "doc2.pdf"],
             categories=["Diagnosis", "Treatment Plan"],
             models=[
-                ("gpt-4o", "openai", "sk-..."),
+                ("gpt-5", "openai", "sk-..."),
                 ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-..."),  # Native PDF
             ],
             pdf_mode="both",

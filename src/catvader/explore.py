@@ -39,6 +39,7 @@ def explore(
     # Social media source
     sm_source: str = None,
     sm_limit: int = 50,
+    sm_months: int = None,
     sm_credentials: dict = None,
     # Social media context fields
     platform: str = None,
@@ -48,7 +49,7 @@ def explore(
     max_categories=12,
     categories_per_chunk=10,
     divisions=12,
-    user_model="gpt-4o",
+    user_model="gpt-5",
     creativity=None,
     specificity="broad",
     research_question=None,
@@ -79,7 +80,7 @@ def explore(
         max_categories (int): Maximum categories per chunk (passed through).
         categories_per_chunk (int): Categories to extract per chunk.
         divisions (int): Number of chunks to divide data into.
-        user_model (str): Model name to use. Default "gpt-4o".
+        user_model (str): Model name to use. Default "gpt-5".
         creativity (float): Temperature setting. None uses model default.
         specificity (str): "broad" or "specific" category granularity.
         research_question (str): Optional research context.
@@ -112,7 +113,7 @@ def explore(
         if input_data is not None:
             raise ValueError("Pass either input_data or sm_source, not both.")
         print(f"[CatVader] Fetching feed from '{sm_source}' (limit={sm_limit})...")
-        _sm_df = fetch_social_media(sm_source, limit=sm_limit, credentials=sm_credentials)
+        _sm_df = fetch_social_media(sm_source, limit=sm_limit, months=sm_months, credentials=sm_credentials)
         input_data = _sm_df["text"].tolist()
         print(f"[CatVader] Fetched {len(input_data)} posts.")
     elif input_data is None:

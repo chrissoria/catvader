@@ -134,7 +134,7 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 - `post_metadata` (dict, optional): Additional post metadata injected into prompt (e.g., `{"avg_likes": 1200}`).
 - `description` (str): Additional context about the input data.
 - `feed_question` (str, default=`""`): Context describing what to look for in the feed. Used when `categories="auto"`. When `sm_source` is set and this is omitted, defaults to `"What topics are discussed in these social media posts?"`.
-- `user_model` (str, default=`"gpt-4o"`): Model to use
+- `user_model` (str, default=`"gpt-5"`): Model to use
 - `mode` (str, default=`"image"`): PDF processing mode — `"image"`, `"text"`, or `"both"`
 - `creativity` (float, optional): Temperature setting (0.0–1.0)
 - `chain_of_thought` (bool, default=`False`): Enable step-by-step reasoning
@@ -210,7 +210,7 @@ results = cat.classify(
     input_data=df['post_text'],
     categories=["Hate speech", "Harassment", "Safe content"],
     models=[
-        ("gpt-4o", "openai", "sk-..."),
+        ("gpt-5", "openai", "sk-..."),
         ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-..."),
         ("gemini-2.5-flash", "google", "AIza..."),
     ],
@@ -244,7 +244,7 @@ Unified category extraction function for text, image, and PDF inputs. Automatica
 - `categories_per_chunk` (int, default=10): Categories to extract per chunk
 - `divisions` (int, default=12): Number of chunks to divide data into
 - `iterations` (int, default=8): Number of extraction passes over the data
-- `user_model` (str, default=`"gpt-4o"`): Model to use
+- `user_model` (str, default=`"gpt-5"`): Model to use
 - `specificity` (str, default=`"broad"`): `"broad"` or `"specific"` category granularity
 - `research_question` (str, optional): Research context to guide extraction
 - `focus` (str, optional): Focus instruction (e.g., `"emotional tone"`, `"political stance"`)
@@ -291,7 +291,7 @@ Raw category extraction for frequency and saturation analysis. Unlike `extract()
 - `post_metadata` (dict, optional): Additional metadata context
 - `categories_per_chunk` (int, default=10): Categories to extract per chunk
 - `divisions` (int, default=12): Number of chunks to divide data into
-- `user_model` (str, default=`"gpt-4o"`): Model to use
+- `user_model` (str, default=`"gpt-5"`): Model to use
 - `creativity` (float, optional): Temperature setting
 - `specificity` (str, default=`"broad"`): `"broad"` or `"specific"`
 - `research_question` (str, optional): Research context
@@ -336,7 +336,7 @@ Extracts specific features and attributes from images, returning exact answers t
 - `image_input` (list): List of image file paths or folder path
 - `features_to_extract` (list): Features to extract (e.g., `["number of people", "primary color"]`)
 - `api_key` (str): API key for the LLM service
-- `user_model` (str, default=`"gpt-4o"`): Specific vision model to use
+- `user_model` (str, default=`"gpt-5"`): Specific vision model to use
 - `creativity` (float, default=0): Temperature setting
 - `filename` (str, default=`"categorized_data.csv"`): Filename for CSV output
 - `save_directory` (str, optional): Directory path to save the CSV file
@@ -354,7 +354,7 @@ features = cat.image_features(
     image_description='Social media post screenshots',
     features_to_extract=['number of hashtags', 'contains image', 'estimated likes'],
     image_input='/path/to/screenshots/',
-    user_model="gpt-4o",
+    user_model="gpt-5",
     api_key=api_key
 )
 ```

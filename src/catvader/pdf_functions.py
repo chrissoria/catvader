@@ -194,7 +194,7 @@ def pdf_multi_class(
     pdf_input,
     categories,
     api_key,
-    user_model="gpt-4o",
+    user_model="gpt-5",
     mode="image",
     creativity=None,
     safety=False,
@@ -225,7 +225,7 @@ def pdf_multi_class(
         categories (list or "auto"): List of category names for classification,
             or "auto" to automatically extract categories from the PDFs first.
         api_key (str): API key for the model provider.
-        user_model (str): Model name to use. Default "gpt-4o".
+        user_model (str): Model name to use. Default "gpt-5".
         mode (str): How to process PDF pages. Options:
             - "image": Render pages as images (best for visual elements like charts/tables)
             - "text": Extract text only (best for text-heavy documents, faster/cheaper)
@@ -1188,7 +1188,7 @@ def explore_pdf_categories(
     max_categories=12,
     categories_per_chunk=10,
     divisions=5,
-    user_model="gpt-4o",
+    user_model="gpt-5",
     creativity=None,
     specificity="broad",
     research_question=None,

@@ -64,6 +64,7 @@ def classify(
     # Social media source — when set, input_data is fetched automatically
     sm_source: str = None,
     sm_limit: int = 50,
+    sm_months: int = None,
     sm_credentials: dict = None,
     # Social media context fields — injected into the classification prompt
     platform: str = None,
@@ -72,7 +73,7 @@ def classify(
     post_metadata: dict = None,
     input_type="text",
     description="",
-    user_model="gpt-4o",
+    user_model="gpt-5",
     mode="image",
     creativity=None,
     safety=False,
@@ -140,12 +141,15 @@ def classify(
             metrics are included in the output DataFrame.
             Supported: "threads"
         sm_limit (int): Number of posts to fetch. Default 50.
+            Ignored when sm_months is set.
+        sm_months (int): If set, fetch all posts from the last N months
+            instead of using sm_limit. E.g. sm_months=12 for one year.
         sm_credentials (dict): Platform credentials. Falls back to env vars.
             For Threads: {"access_token": "...", "user_id": "..."}
         input_type (str): DEPRECATED - input type is now auto-detected.
             Kept for backward compatibility.
         description (str): Description of the input data context.
-        user_model (str): Model name to use. Default "gpt-4o".
+        user_model (str): Model name to use. Default "gpt-5".
         mode (str): PDF processing mode:
             - "image" (default): Render pages as images
             - "text": Extract text only
@@ -218,7 +222,7 @@ def classify(
         ...     input_data=df['responses'],
         ...     categories=["Positive", "Negative"],
         ...     models=[
-        ...         ("gpt-4o", "openai", "sk-..."),
+        ...         ("gpt-5", "openai", "sk-..."),
         ...         ("claude-sonnet-4-5-20250929", "anthropic", "sk-ant-..."),
         ...     ],
         ...     consensus_threshold="majority",  # or "two-thirds", "unanimous", or 0.75
@@ -234,7 +238,7 @@ def classify(
                 "Pass either input_data or sm_source, not both."
             )
         print(f"[CatVader] Fetching feed from '{sm_source}' (limit={sm_limit})...")
-        _sm_df = fetch_social_media(sm_source, limit=sm_limit, credentials=sm_credentials)
+        _sm_df = fetch_social_media(sm_source, limit=sm_limit, months=sm_months, credentials=sm_credentials)
         input_data = _sm_df["text"].tolist()
         print(f"[CatVader] Fetched {len(input_data)} posts.")
         if not feed_question:
