@@ -1316,6 +1316,8 @@ if 'image_data' not in st.session_state:
     st.session_state.image_data = None
 if 'extraction_params' not in st.session_state:
     st.session_state.extraction_params = None  # Stores params when categories are auto-extracted
+if 'bluesky_df' not in st.session_state:
+    st.session_state.bluesky_df = None
 
 # Logo and title - use HTML for better alignment
 st.markdown("""
@@ -1393,52 +1395,98 @@ with col_input:
     if input_type_choice == "Social Media Posts":
         input_type_selected = "text"
 
-        upload_col, example_col = st.columns([3, 1])
-        with upload_col:
-            uploaded_file = st.file_uploader(
-                "Upload Data (CSV or Excel)",
-                type=['csv', 'xlsx', 'xls'],
-                key="survey_file"
-            )
-        with example_col:
-            st.markdown("<div style='height: 27px;'></div>", unsafe_allow_html=True)  # Match "Upload Data" label height
-            st.markdown('<div class="tall-button">', unsafe_allow_html=True)
-            if st.button("Try Example Dataset", key="example_btn", use_container_width=True):
-                st.session_state.example_loaded = True
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        columns = []
-        df = None
-        if uploaded_file is not None:
-            try:
-                if uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file)
-                else:
-                    df = pd.read_excel(uploaded_file)
-                columns = df.columns.tolist()
-                st.success(f"Loaded {len(df):,} rows")
-            except Exception as e:
-                st.error(f"Error loading file: {e}")
-        elif hasattr(st.session_state, 'example_loaded') and st.session_state.example_loaded:
-            try:
-                df = pd.read_csv("example_data.csv")
-                columns = df.columns.tolist()
-                st.success(f"Loaded example dataset ({len(df)} rows)")
-            except:
-                pass
-
-        selected_column = st.selectbox(
-            "Column to Process",
-            options=columns if columns else ["Upload a file first"],
-            disabled=not columns,
-            key="survey_column"
+        data_source = st.radio(
+            "Data Source",
+            options=["Upload CSV/Excel", "Fetch from Bluesky"],
+            horizontal=True,
+            key="data_source_radio"
         )
 
-        description = selected_column if columns else ""
-        original_filename = uploaded_file.name if uploaded_file else "example_data.csv"
+        if data_source == "Upload CSV/Excel":
+            st.session_state.bluesky_df = None  # Clear any fetched data when switching sources
+            upload_col, example_col = st.columns([3, 1])
+            with upload_col:
+                uploaded_file = st.file_uploader(
+                    "Upload Data (CSV or Excel)",
+                    type=['csv', 'xlsx', 'xls'],
+                    key="survey_file"
+                )
+            with example_col:
+                st.markdown("<div style='height: 27px;'></div>", unsafe_allow_html=True)  # Match "Upload Data" label height
+                st.markdown('<div class="tall-button">', unsafe_allow_html=True)
+                if st.button("Try Example Dataset", key="example_btn", use_container_width=True):
+                    st.session_state.example_loaded = True
+                st.markdown('</div>', unsafe_allow_html=True)
 
-        if df is not None and columns and selected_column in columns:
-            input_data = df[selected_column].tolist()
+            columns = []
+            df = None
+            if uploaded_file is not None:
+                try:
+                    if uploaded_file.name.endswith('.csv'):
+                        df = pd.read_csv(uploaded_file)
+                    else:
+                        df = pd.read_excel(uploaded_file)
+                    columns = df.columns.tolist()
+                    st.success(f"Loaded {len(df):,} rows")
+                except Exception as e:
+                    st.error(f"Error loading file: {e}")
+            elif hasattr(st.session_state, 'example_loaded') and st.session_state.example_loaded:
+                try:
+                    df = pd.read_csv("example_data.csv")
+                    columns = df.columns.tolist()
+                    st.success(f"Loaded example dataset ({len(df)} rows)")
+                except:
+                    pass
+
+            selected_column = st.selectbox(
+                "Column to Process",
+                options=columns if columns else ["Upload a file first"],
+                disabled=not columns,
+                key="survey_column"
+            )
+
+            description = selected_column if columns else ""
+            original_filename = uploaded_file.name if uploaded_file else "example_data.csv"
+
+            if df is not None and columns and selected_column in columns:
+                input_data = df[selected_column].tolist()
+
+        else:  # Fetch from Bluesky
+            bsky_handle = st.text_input(
+                "Bluesky Handle",
+                placeholder="e.g. aoc.bsky.social or @aoc.bsky.social",
+                key="bluesky_handle_input"
+            )
+            bsky_num_posts = st.slider(
+                "Number of Posts to Fetch",
+                min_value=10, max_value=250, value=50, step=10,
+                key="bluesky_num_posts"
+            )
+            if st.button("Fetch Posts", key="fetch_bluesky_btn"):
+                handle_clean = bsky_handle.strip().lstrip("@")
+                if not handle_clean:
+                    st.error("Please enter a Bluesky handle.")
+                else:
+                    with st.spinner(f"Fetching {bsky_num_posts} posts from {handle_clean}..."):
+                        try:
+                            from catvader._social_media import fetch_bluesky
+                            df_bsky = fetch_bluesky(limit=bsky_num_posts, handle=handle_clean)
+                            df_bsky = df_bsky[df_bsky["media_type"] != "REPOST_FACADE"].reset_index(drop=True)
+                            st.session_state.bluesky_df = df_bsky
+                        except Exception as e:
+                            st.error(f"Error fetching posts: {e}")
+
+            if st.session_state.bluesky_df is not None:
+                bsky_df = st.session_state.bluesky_df
+                st.success(f"Fetched {len(bsky_df)} posts")
+                st.dataframe(
+                    bsky_df[["timestamp", "text", "likes", "replies"]].head(5),
+                    use_container_width=True
+                )
+                handle_clean = bsky_handle.strip().lstrip("@") if bsky_handle else "bluesky"
+                input_data = bsky_df["text"].tolist()
+                description = f"Bluesky posts from @{handle_clean}"
+                original_filename = f"bluesky_{handle_clean.replace('.', '_')}"
 
     elif input_type_choice == "PDF Documents":
         input_type_selected = "pdf"
@@ -1993,6 +2041,16 @@ with col_input:
                     if all_results:
                         # Combine results
                         result_df = pd.concat(all_results, ignore_index=True)
+
+                        # Merge Bluesky engagement columns if available
+                        if st.session_state.get("bluesky_df") is not None:
+                            bsky_eng = st.session_state.bluesky_df.reset_index(drop=True)
+                            if len(bsky_eng) == len(result_df):
+                                for col in ["post_id", "timestamp", "likes", "replies", "reposts",
+                                            "media_type", "image_url", "post_length",
+                                            "contains_url", "contains_image", "is_repost"]:
+                                    if col in bsky_eng.columns:
+                                        result_df[col] = bsky_eng[col].values
 
                         # Save CSV
                         with tempfile.NamedTemporaryFile(mode='w', suffix='_classified.csv', delete=False) as f:
