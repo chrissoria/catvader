@@ -67,6 +67,7 @@ def classify(
     sm_limit: int = 50,
     sm_months: int = None,
     sm_credentials: dict = None,
+    sm_timezone: str = "UTC",
     # Social media context fields — injected into the classification prompt
     platform: str = None,
     handle: str = None,
@@ -147,6 +148,9 @@ def classify(
             instead of using sm_limit. E.g. sm_months=12 for one year.
         sm_credentials (dict): Platform credentials. Falls back to env vars.
             For Threads: {"access_token": "...", "user_id": "..."}
+        sm_timezone (str): Timezone for the 'day' and 'month' output columns.
+            Default "UTC". Use any pytz/IANA string, e.g. "America/Los_Angeles",
+            "America/New_York", "Europe/London".
         input_type (str): DEPRECATED - input type is now auto-detected.
             Kept for backward compatibility.
         description (str): Description of the input data context.
@@ -437,7 +441,10 @@ def classify(
         # Derive day-of-week and month name from timestamp
         if "timestamp" in _sm_df.columns:
             ts = pd.to_datetime(_sm_df["timestamp"], utc=True, errors="coerce")
+            if sm_timezone != "UTC":
+                ts = ts.dt.tz_convert(sm_timezone)
             result["day"] = ts.dt.day_name().values
             result["month"] = ts.dt.month_name().values
+            result["hour"] = ts.dt.hour.values
 
     return result
