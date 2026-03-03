@@ -1,7 +1,7 @@
 # cat-vader
 
 <p align="center">
-  <img src="logo.png" alt="CatVader logo" width="180"/>
+  <img src="https://raw.githubusercontent.com/chrissoria/catvader/main/logo.png" alt="CatVader logo" width="180"/>
 </p>
 
 CatVader: An AI Pipeline for Classifying and Exploring Social Media Data
