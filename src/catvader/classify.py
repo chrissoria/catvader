@@ -454,5 +454,9 @@ def classify(
         # Post length in characters
         if "text" in _sm_df.columns:
             result["post_length"] = _sm_df["text"].fillna("").str.len().values
+            result["contains_url"] = _sm_df["text"].fillna("").str.contains(r"https?://", regex=True).astype(int).values
+        # Contains image (any media type with an image or video thumbnail)
+        if "image_url" in _sm_df.columns:
+            result["contains_image"] = (_sm_df["image_url"].fillna("") != "").astype(int).values
 
     return result
