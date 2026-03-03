@@ -127,7 +127,9 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 - `api_key` (str): API key for the LLM service (single-model mode)
 - `sm_source` (str, optional): Social media platform to pull posts from automatically (e.g., `"threads"`). When set, `input_data` is fetched and does not need to be provided.
 - `sm_limit` (int, default=`50`): Number of posts to fetch when using `sm_source`.
+- `sm_months` (int, optional): Fetch all posts from the last N months instead of using `sm_limit`.
 - `sm_credentials` (dict, optional): Platform credentials (e.g., `{"access_token": "...", "user_id": "..."}`). Falls back to env vars.
+- `sm_timezone` (str, default=`"UTC"`): Timezone for the `day`, `month`, `hour`, and `n_posts_that_day` output columns. Any IANA timezone string (e.g., `"America/Los_Angeles"`, `"America/New_York"`, `"Europe/London"`).
 - `platform` (str, optional): Social media platform label (e.g., `"Twitter/X"`, `"Reddit"`, `"TikTok"`). Injected into the classification prompt as context.
 - `handle` (str, optional): Author handle (e.g., `"@username"`, `"r/subreddit"`). Injected into prompt.
 - `hashtags` (str or list, optional): Hashtags associated with the posts. Injected into prompt.
@@ -154,7 +156,24 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 | **Google** | Thinking disabled | `thinkingConfig: {thinkingBudget: N}` |
 
 **Returns:**
-- `pandas.DataFrame`: Classification results with category columns
+- `pandas.DataFrame`: Classification results with category columns. When using `sm_source`, the DataFrame also includes:
+
+| Column | Description |
+|--------|-------------|
+| `post_id` | Platform post ID |
+| `timestamp` | Raw post datetime (UTC) |
+| `media_type` | `TEXT`, `IMAGE`, `VIDEO`, or `CAROUSEL_ALBUM` |
+| `image_url` | Image or video thumbnail URL |
+| `likes` | Like count |
+| `replies` | Reply count |
+| `reposts` | Repost count |
+| `quotes` | Quote count |
+| `views` | View count |
+| `shares` | Share count |
+| `day` | Day of week (e.g., `"Monday"`) |
+| `month` | Month name (e.g., `"June"`) |
+| `hour` | Hour of day, 24-hour scale (e.g., `23`) |
+| `n_posts_that_day` | Total posts made on that calendar date |
 
 **Examples:**
 
