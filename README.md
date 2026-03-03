@@ -125,11 +125,17 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 - `input_data`: The data to classify (text list/Series, image paths, or PDF paths). Omit when using `sm_source`.
 - `categories` (list): List of category names for classification. Use `"auto"` to discover categories automatically.
 - `api_key` (str): API key for the LLM service (single-model mode)
-- `sm_source` (str, optional): Social media platform to pull posts from automatically (e.g., `"threads"`). When set, `input_data` is fetched and does not need to be provided.
-- `sm_limit` (int, default=`50`): Number of posts to fetch when using `sm_source`.
+- `sm_source` (str, optional): Social media platform to pull posts from automatically. Supported: `"threads"`, `"bluesky"`, `"reddit"`, `"mastodon"`, `"youtube"`. When set, `input_data` is fetched and does not need to be provided.
+- `sm_limit` (int, default=`50`): Number of posts/videos to fetch. For YouTube comments mode, number of videos to pull comments from.
 - `sm_months` (int, optional): Fetch all posts from the last N months instead of using `sm_limit`.
+- `sm_days` (int, optional): Fetch all posts from the last N days (overrides `sm_months`).
 - `sm_credentials` (dict, optional): Platform credentials (e.g., `{"access_token": "...", "user_id": "..."}`). Falls back to env vars.
+- `sm_handle` (str, optional): Account handle for platforms that require one. Bluesky: `"user.bsky.social"`. Mastodon: `"user@instance.social"`. YouTube: `"@ChannelHandle"` or channel ID.
 - `sm_timezone` (str, default=`"UTC"`): Timezone for the `day`, `month`, `hour`, and `n_posts_that_day` output columns. Any IANA timezone string (e.g., `"America/Los_Angeles"`, `"America/New_York"`, `"Europe/London"`).
+- `sm_youtube_content` (str, default=`"video"`): YouTube only. Unit of analysis — `"video"` (one row per video) or `"comments"` (one row per comment, with video-level covariates).
+- `sm_youtube_transcript` (bool, default=`False`): YouTube video mode only. Use the auto-generated transcript as the `text` column instead of the description. Falls back to description if unavailable. Requires `pip install youtube-transcript-api`.
+- `sm_youtube_transcript_max_chars` (int, default=`10_000`): Max characters from the transcript. Set to `None` for the full transcript (can be 100k+ chars for long videos).
+- `sm_comments_per_video` (int, default=`20`): YouTube comments mode only. Max top-level comments per video.
 - `platform` (str, optional): Social media platform label (e.g., `"Twitter/X"`, `"Reddit"`, `"TikTok"`). Injected into the classification prompt as context.
 - `handle` (str, optional): Author handle (e.g., `"@username"`, `"r/subreddit"`). Injected into prompt.
 - `hashtags` (str or list, optional): Hashtags associated with the posts. Injected into prompt.
@@ -162,10 +168,10 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 |--------|-------------|
 | `post_id` | Platform post ID |
 | `timestamp` | Raw post datetime (UTC) |
-| `media_type` | `TEXT`, `IMAGE`, `VIDEO`, or `CAROUSEL_ALBUM` |
+| `media_type` | `TEXT`, `IMAGE`, `VIDEO`, `COMMENT`, or `CAROUSEL_ALBUM` |
 | `image_url` | Image or video thumbnail URL |
 | `likes` | Like count |
-| `replies` | Reply count |
+| `replies` | Reply / comment count |
 | `reposts` | Repost count |
 | `quotes` | Quote count |
 | `views` | View count |
@@ -174,6 +180,15 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 | `month` | Month name (e.g., `"June"`) |
 | `hour` | Hour of day, 24-hour scale (e.g., `23`) |
 | `n_posts_that_day` | Total posts made on that calendar date |
+| `duration_seconds` | *(YouTube video mode)* Video length in seconds |
+| `tags` | *(YouTube video mode)* Creator-specified tags as a list |
+| `video_id` | *(YouTube comments mode)* Parent video ID |
+| `video_title` | *(YouTube comments mode)* Parent video title |
+| `video_likes` | *(YouTube comments mode)* Parent video like count |
+| `video_views` | *(YouTube comments mode)* Parent video view count |
+| `video_comment_count` | *(YouTube comments mode)* Parent video total comments |
+| `video_duration_seconds` | *(YouTube comments mode)* Parent video length in seconds |
+| `video_tags` | *(YouTube comments mode)* Parent video tags as a list |
 
 **Examples:**
 
@@ -213,6 +228,49 @@ results = cat.classify(
     sm_limit=50,
     categories="auto",
     feed_question="What topics and themes appear in these posts?",
+    api_key=api_key
+)
+
+# Pull from a Mastodon account (no credentials needed)
+results = cat.classify(
+    sm_source="mastodon",
+    sm_handle="Gargron@mastodon.social",
+    sm_limit=50,
+    categories=["Tech & Open Source", "Politics", "Personal", "Other"],
+    api_key=api_key
+)
+
+# YouTube — classify videos by title + description
+results = cat.classify(
+    sm_source="youtube",
+    sm_handle="@H3Podcast",
+    sm_limit=50,
+    sm_credentials={"api_key": youtube_api_key},
+    categories=["Commentary & Reaction", "Interviews", "Humor & Parody", "Other"],
+    api_key=api_key
+)
+
+# YouTube — classify videos using full transcripts
+results = cat.classify(
+    sm_source="youtube",
+    sm_handle="@H3Podcast",
+    sm_limit=20,
+    sm_credentials={"api_key": youtube_api_key},
+    sm_youtube_transcript=True,
+    sm_youtube_transcript_max_chars=50_000,
+    categories=["Commentary & Reaction", "Interviews", "Humor & Parody", "Other"],
+    api_key=api_key
+)
+
+# YouTube — classify at the comment level (video stats as covariates)
+results = cat.classify(
+    sm_source="youtube",
+    sm_handle="@H3Podcast",
+    sm_limit=10,                    # 10 videos
+    sm_youtube_content="comments",
+    sm_comments_per_video=50,
+    sm_credentials={"api_key": youtube_api_key},
+    categories=["Supportive", "Critical", "Humorous", "Off-topic"],
     api_key=api_key
 )
 

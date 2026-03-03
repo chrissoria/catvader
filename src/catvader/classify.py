@@ -70,6 +70,10 @@ def classify(
     sm_credentials: dict = None,
     sm_handle: str = None,
     sm_timezone: str = "UTC",
+    sm_youtube_content: str = "video",
+    sm_youtube_transcript: bool = False,
+    sm_comments_per_video: int = 20,
+    sm_youtube_transcript_max_chars: int = 10_000,
     # Social media context fields — injected into the classification prompt
     platform: str = None,
     handle: str = None,
@@ -143,7 +147,7 @@ def classify(
         sm_source (str): Social media platform to pull feed data from.
             When set, input_data is fetched automatically and engagement
             metrics are included in the output DataFrame.
-            Supported: "threads", "bluesky", "reddit"
+            Supported: "threads", "bluesky", "reddit", "mastodon", "youtube"
         sm_limit (int): Number of posts to fetch. Default 50.
             Ignored when sm_months is set.
         sm_months (int): If set, fetch all posts from the last N months
@@ -151,12 +155,32 @@ def classify(
         sm_days (int): If set, fetch all posts from the last N days.
             Overrides sm_months. E.g. sm_days=1 for today's posts.
             Currently supported for Reddit only.
+        sm_handle (str): Account handle for platforms that require one.
+            Bluesky: "user.bsky.social"
+            Mastodon: "user@instance.social" (specifies both user and instance)
+            YouTube: "@h3productions" or bare name "h3productions" or "UCxxxxxx"
+        sm_youtube_content (str): YouTube only. Unit of analysis:
+            - "video" (default): one row per video.
+            - "comments": one row per comment. Video-level stats (video_likes,
+              video_views, video_comment_count, video_title) travel as covariate
+              columns so you can use video context in comment-level analyses.
+              sm_limit controls how many videos to pull comments from.
+        sm_youtube_transcript (bool): YouTube video mode only. When True, use
+            the auto-generated transcript as the text column instead of the
+            description. Falls back to description if transcripts are unavailable.
+            Default False.
+        sm_youtube_transcript_max_chars (int): YouTube transcript mode only. Max
+            characters to include from the transcript. Default 10,000. Set to None
+            for the full transcript (can be 100k+ chars for long videos).
+        sm_comments_per_video (int): YouTube comments mode only. Max top-level
+            comments per video. Default 20.
         sm_credentials (dict): Platform credentials. Falls back to env vars.
             For Threads:  {"access_token": "...", "user_id": "..."}
             For Bluesky:  {"handle": "...", "app_password": "..."}
             For Reddit (public subreddit):   {"subreddit": "MachineLearning"}
             For Reddit (public user posts):  {"username": "chrissoria"}
             For Reddit (OAuth, higher limits): add "client_id" + "client_secret"
+            For YouTube: {"api_key": "..."} or set YOUTUBE_API_KEY env var
         sm_timezone (str): Timezone for the 'day' and 'month' output columns.
             Default "UTC". Use any pytz/IANA string, e.g. "America/Los_Angeles",
             "America/New_York", "Europe/London".
@@ -259,7 +283,18 @@ def classify(
             target = "your account"
         window = f"last {sm_days}d" if sm_days else f"last {sm_months}mo" if sm_months else f"limit={sm_limit}"
         print(f"[CatVader] Fetching feed from '{sm_source}' ({target}, {window})...")
-        _sm_df = fetch_social_media(sm_source, limit=sm_limit, months=sm_months, days=sm_days, credentials=sm_credentials, handle=sm_handle)
+        _sm_df = fetch_social_media(
+            sm_source,
+            limit=sm_limit,
+            months=sm_months,
+            days=sm_days,
+            credentials=sm_credentials,
+            handle=sm_handle,
+            youtube_content=sm_youtube_content,
+            youtube_transcript=sm_youtube_transcript,
+            comments_per_video=sm_comments_per_video,
+            youtube_transcript_max_chars=sm_youtube_transcript_max_chars,
+        )
         input_data = _sm_df["text"].tolist()
         print(f"[CatVader] Fetched {len(input_data)} posts.")
         if not feed_question:

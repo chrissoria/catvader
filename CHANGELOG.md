@@ -11,6 +11,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.11.0] - 2026-03-02
+
+### Added
+- **Mastodon support** via `sm_source="mastodon"`.
+  - No credentials required — uses the public REST API.
+  - `sm_handle` accepts `"user@instance.social"`, `"@user@instance.social"`, or a full profile URL.
+  - HTML tags stripped and entities decoded from post content.
+- **YouTube support** via `sm_source="youtube"`.
+  - Requires a YouTube Data API v3 key: `sm_credentials={"api_key": "..."}` or `YOUTUBE_KEY` / `YOUTUBE_API_KEY` env var.
+  - `sm_handle` accepts `"@ChannelHandle"`, a channel ID (`"UCxxxxxx"`), or a full channel URL.
+  - **Video mode** (`sm_youtube_content="video"`, default): one row per video; `text` = title + description.
+  - **Transcript mode** (`sm_youtube_transcript=True`): replaces description with the auto-generated transcript (requires `pip install youtube-transcript-api`); falls back to description if unavailable.
+  - **Comments mode** (`sm_youtube_content="comments"`): one row per comment; video-level stats travel as covariate columns (`video_id`, `video_title`, `video_likes`, `video_views`, `video_comment_count`, `video_duration_seconds`, `video_tags`).
+  - `duration_seconds` and `tags` columns added to video-mode output.
+  - HTML entities and tags decoded from YouTube comment text.
+- New `classify()` parameters for YouTube:
+  - `sm_youtube_content` (`"video"` | `"comments"`) — unit of analysis.
+  - `sm_youtube_transcript` (bool) — use transcript as text in video mode.
+  - `sm_youtube_transcript_max_chars` (int, default `10_000`) — max transcript characters; `None` = full transcript.
+  - `sm_comments_per_video` (int, default `20`) — max comments per video in comments mode.
+- `sm_handle` parameter on `classify()` and `fetch_social_media()` — top-level handle for platforms that require one (Mastodon, YouTube, Bluesky).
+
+---
+
 ## [1.10.0] - 2026-03-04
 
 ### Added

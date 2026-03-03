@@ -6,16 +6,20 @@ Usage via classify():
     classify(
         feed_input=None,          # omit when using sm_source
         categories=[...],
-        sm_source="threads",      # platform to pull from ("threads", "bluesky", "reddit")
+        sm_source="threads",      # platform to pull from
         sm_limit=50,              # number of posts to fetch
         sm_credentials={...},     # optional; falls back to env vars
     )
 
-Supported sources: "threads", "bluesky", "reddit"
+Supported sources: "threads", "bluesky", "reddit", "mastodon", "youtube"
 """
 
+import html
 import os
 import time
+from html.parser import HTMLParser
+from urllib.parse import urlparse
+
 import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -309,6 +313,184 @@ def fetch_bluesky(limit: int = 50, months: int = None, credentials: dict = None,
 
 
 # =============================================================================
+# Mastodon
+# =============================================================================
+
+class _HTMLStripper(HTMLParser):
+    """Minimal HTML stripper used for Mastodon post content."""
+    def __init__(self):
+        super().__init__()
+        self._parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("br", "p"):
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag == "p":
+            self._parts.append("\n")
+
+    def handle_data(self, data):
+        self._parts.append(data)
+
+    def result(self):
+        import re as _re
+        text = html.unescape("".join(self._parts))
+        return _re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _mastodon_strip_html(text: str) -> str:
+    """Strip HTML tags from Mastodon post content and decode entities."""
+    if not text:
+        return ""
+    stripper = _HTMLStripper()
+    stripper.feed(text)
+    return stripper.result()
+
+
+def _mastodon_parse_handle(handle: str) -> tuple:
+    """
+    Parse a Mastodon handle into (instance, username).
+
+    Accepts:
+        "user@mastodon.social"
+        "@user@mastodon.social"
+        "https://mastodon.social/@user"
+    Returns:
+        ("mastodon.social", "user")
+    """
+    handle = handle.strip()
+    if handle.startswith("http"):
+        parsed = urlparse(handle)
+        instance = parsed.netloc
+        username = parsed.path.lstrip("/@")
+        return instance, username
+    handle = handle.lstrip("@")
+    if "@" not in handle:
+        raise ValueError(
+            f"Invalid Mastodon handle: '{handle}'. "
+            "Use the format 'user@instance.social' (e.g. 'user@mastodon.social')."
+        )
+    username, instance = handle.split("@", 1)
+    return instance, username
+
+
+def _mastodon_lookup_account(instance: str, username: str) -> dict:
+    """Look up a Mastodon account by username on the given instance."""
+    r = requests.get(
+        f"https://{instance}/api/v1/accounts/lookup",
+        params={"acct": username},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _mastodon_extract_image_url(status: dict) -> str:
+    """Extract the first image or video thumbnail URL from a Mastodon status."""
+    for attachment in status.get("media_attachments", []):
+        if attachment.get("type") in ("image", "gifv"):
+            return attachment.get("url", "")
+        if attachment.get("type") == "video":
+            return attachment.get("preview_url", "")
+    return ""
+
+
+def _mastodon_media_type(status: dict) -> str:
+    """Derive a media_type string consistent with other platform fetchers."""
+    if status.get("reblog"):
+        return "REPOST_FACADE"
+    attachments = status.get("media_attachments", [])
+    if any(a.get("type") == "video" for a in attachments):
+        return "VIDEO"
+    if any(a.get("type") in ("image", "gifv") for a in attachments):
+        return "IMAGE"
+    return "TEXT_POST"
+
+
+def fetch_mastodon(limit: int = 50, months: int = None, handle: str = None) -> pd.DataFrame:
+    """
+    Fetch recent posts from a public Mastodon account (no authentication needed).
+
+    Args:
+        limit (int): Maximum number of posts to fetch. Default 50.
+            Ignored when months is set.
+        months (int): If set, only return posts from the last N months.
+        handle (str): Mastodon handle in the format 'user@instance.social'
+            (e.g. 'Gargron@mastodon.social'). Leading '@' is optional.
+
+    Returns:
+        pd.DataFrame with columns:
+            post_id, timestamp, media_type, text, image_url,
+            likes, replies, reposts, quotes, views, shares
+        (quotes, views, shares are 0 — not exposed by the Mastodon API)
+    """
+    if not handle:
+        raise ValueError(
+            "Mastodon requires a handle. Pass sm_handle='user@instance.social'."
+        )
+    instance, username = _mastodon_parse_handle(handle)
+    account = _mastodon_lookup_account(instance, username)
+    account_id = account["id"]
+
+    cutoff = None
+    if months is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    rows = []
+    max_id = None
+    page_size = min(limit if months is None else 40, 40)  # Mastodon API max is 40
+
+    while True:
+        params = {"limit": page_size}
+        if max_id:
+            params["max_id"] = max_id
+
+        r = requests.get(
+            f"https://{instance}/api/v1/accounts/{account_id}/statuses",
+            params=params,
+            timeout=15,
+        )
+        r.raise_for_status()
+        statuses = r.json()
+
+        if not statuses:
+            break
+
+        for status in statuses:
+            ts_str = status.get("created_at", "")
+            if cutoff and ts_str:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                if ts < cutoff:
+                    return pd.DataFrame(rows)
+
+            # For reblogs use the original content
+            reblog = status.get("reblog")
+            raw_content = reblog.get("content", "") if reblog else status.get("content", "")
+
+            rows.append({
+                "post_id":    status.get("id", ""),
+                "timestamp":  ts_str,
+                "media_type": _mastodon_media_type(status),
+                "text":       _mastodon_strip_html(raw_content),
+                "image_url":  _mastodon_extract_image_url(status),
+                "likes":      status.get("favourites_count", 0),
+                "replies":    status.get("replies_count", 0),
+                "reposts":    status.get("reblogs_count", 0),
+                "quotes":     0,
+                "views":      0,
+                "shares":     0,
+            })
+
+            if months is None and len(rows) >= limit:
+                return pd.DataFrame(rows)
+
+        max_id = statuses[-1]["id"]
+
+    return pd.DataFrame(rows)
+
+
+# =============================================================================
 # Reddit
 # =============================================================================
 
@@ -585,28 +767,471 @@ def fetch_reddit(limit: int = 50, months: int = None, days: int = None, credenti
     return pd.DataFrame(rows)
 
 
+# =============================================================================
+# YouTube
+# =============================================================================
+
+_YOUTUBE_BASE_URL = "https://www.googleapis.com/youtube/v3"
+
+
+def _load_youtube_credentials(credentials: dict = None) -> str:
+    """Return YouTube API key, preferring explicit credentials dict.
+
+    Falls back in order:
+      1. sm_credentials={'api_key': '...'}
+      2. YOUTUBE_API_KEY env var
+      3. GOOGLE_API_KEY env var (if YouTube Data API v3 is enabled for that key)
+    """
+    load_dotenv(_ENV_PATH, override=True)
+    api_key = (
+        (credentials or {}).get("api_key")
+        or os.getenv("YOUTUBE_API_KEY")
+        or os.getenv("YOUTUBE_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    )
+    if not api_key:
+        raise ValueError(
+            "No YouTube API key found. Pass sm_credentials={'api_key': '...'} "
+            f"or set YOUTUBE_API_KEY (or GOOGLE_API_KEY) in {_ENV_PATH}\n"
+            "  Get a free key at https://console.cloud.google.com/ "
+            "(enable YouTube Data API v3)"
+        )
+    return api_key
+
+
+def _youtube_get_channel_id(handle: str, api_key: str) -> str:
+    """Resolve a YouTube channel handle or URL to a channel ID."""
+    handle = handle.strip()
+
+    # Strip full URL if given
+    if "youtube.com" in handle:
+        parsed = urlparse(handle)
+        path = parsed.path.lstrip("/")
+        if path.startswith("@"):
+            handle = path                              # e.g. "@h3productions"
+        elif path.startswith("channel/"):
+            return path.split("channel/")[1].split("/")[0]
+        elif path.startswith("user/"):
+            handle = path.split("user/")[1].split("/")[0]
+
+    # Already a channel ID
+    if handle.startswith("UC") and len(handle) == 24:
+        return handle
+
+    # forHandle lookup (new @ handles and bare names)
+    lookup_handle = handle if handle.startswith("@") else f"@{handle}"
+    r = requests.get(
+        f"{_YOUTUBE_BASE_URL}/channels",
+        params={"part": "id", "forHandle": lookup_handle, "key": api_key},
+        timeout=10,
+    )
+    if r.status_code == 200:
+        items = r.json().get("items", [])
+        if items:
+            return items[0]["id"]
+
+    raise ValueError(
+        f"Could not resolve YouTube channel handle: '{handle}'.\n"
+        "Use formats like '@h3productions', 'h3productions', or 'UCxxxxxx'."
+    )
+
+
+def _youtube_get_uploads_playlist(channel_id: str, api_key: str) -> str:
+    """Get the uploads playlist ID for a channel."""
+    r = requests.get(
+        f"{_YOUTUBE_BASE_URL}/channels",
+        params={"part": "contentDetails", "id": channel_id, "key": api_key},
+        timeout=10,
+    )
+    r.raise_for_status()
+    items = r.json().get("items", [])
+    if not items:
+        raise ValueError(f"No YouTube channel found with ID: {channel_id}")
+    return items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+
+def _youtube_parse_duration(iso_duration: str) -> int:
+    """Convert ISO 8601 duration (e.g. 'PT1H23M45S') to total seconds."""
+    import re as _re
+    if not iso_duration:
+        return 0
+    m = _re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso_duration)
+    if not m:
+        return 0
+    h, mn, s = (int(x or 0) for x in m.groups())
+    return h * 3600 + mn * 60 + s
+
+
+def _youtube_get_video_stats(video_ids: list, api_key: str) -> dict:
+    """
+    Batch-fetch statistics, duration, and tags for up to 50 video IDs.
+    Returns {video_id: dict} with keys: likeCount, viewCount, commentCount,
+    duration_seconds, tags.
+    """
+    r = requests.get(
+        f"{_YOUTUBE_BASE_URL}/videos",
+        params={
+            "part": "statistics,contentDetails,snippet",
+            "id": ",".join(video_ids),
+            "key": api_key,
+        },
+        timeout=15,
+    )
+    r.raise_for_status()
+    result = {}
+    for item in r.json().get("items", []):
+        stats   = item.get("statistics",     {})
+        details = item.get("contentDetails", {})
+        snip    = item.get("snippet",        {})
+        result[item["id"]] = {
+            **stats,
+            "duration_seconds": _youtube_parse_duration(details.get("duration", "")),
+            "tags":             snip.get("tags", []),
+        }
+    return result
+
+
+def _youtube_get_transcript(video_id: str, max_chars: int = 10_000) -> str | None:
+    """
+    Fetch the auto-generated or manual transcript for a YouTube video.
+
+    Returns the joined transcript text (up to max_chars), or None if
+    transcripts are unavailable (disabled, private, or not generated yet).
+
+    Requires: pip install youtube-transcript-api>=1.0
+    Supports both v0.x (get_transcript class method) and v1.x (fetch instance method).
+    """
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        # v1.x uses instance method; v0.x used class method get_transcript
+        if hasattr(YouTubeTranscriptApi, "get_transcript"):
+            segments = YouTubeTranscriptApi.get_transcript(video_id)
+            text = " ".join(seg["text"] for seg in segments)
+        else:
+            api = YouTubeTranscriptApi()
+            fetched = api.fetch(video_id)
+            text = " ".join(s.text for s in fetched)
+        if max_chars is not None and len(text) > max_chars:
+            text = text[:max_chars] + "..."
+        return text
+    except Exception:
+        return None
+
+
+def _youtube_fetch_video_comments(
+    video_id: str,
+    video_title: str,
+    api_key: str,
+    max_comments: int = 20,
+    video_stats: dict = None,
+) -> list:
+    """
+    Fetch the top N comments for a single video (ordered by relevance).
+
+    Each comment row carries the parent video's aggregate stats as
+    'video_*' columns (video_likes, video_views, video_comment_count,
+    video_title, video_id), making it easy to use video-level features
+    as covariates in comment-level analyses.
+
+    Returns a list of row dicts compatible with the standard column schema.
+    Comments disabled on a video are silently skipped (returns []).
+    """
+    vstats = video_stats or {}
+    rows = []
+    next_page_token = None
+
+    while len(rows) < max_comments:
+        params = {
+            "part": "snippet",
+            "videoId": video_id,
+            "order": "relevance",
+            "maxResults": min(max_comments - len(rows), 100),
+            "key": api_key,
+        }
+        if next_page_token:
+            params["pageToken"] = next_page_token
+
+        r = requests.get(
+            f"{_YOUTUBE_BASE_URL}/commentThreads",
+            params=params,
+            timeout=15,
+        )
+        if r.status_code in (403, 404):
+            break  # comments disabled or video unavailable
+        r.raise_for_status()
+        body = r.json()
+
+        for item in body.get("items", []):
+            top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+            rows.append({
+                # Standard columns — refer to the comment itself
+                "post_id":              item.get("id", ""),
+                "timestamp":            top.get("publishedAt", ""),
+                "media_type":           "COMMENT",
+                "text":                 _mastodon_strip_html(top.get("textDisplay", "")),
+                "image_url":            "",
+                "likes":                top.get("likeCount", 0),
+                "replies":              item.get("snippet", {}).get("totalReplyCount", 0),
+                "reposts":              0,
+                "quotes":               0,
+                "views":                0,
+                "shares":               0,
+                # Video-level context columns — treat as covariates
+                "video_id":               video_id,
+                "video_title":            video_title,
+                "video_likes":            vstats.get("likes",            0),
+                "video_views":            vstats.get("views",            0),
+                "video_comment_count":    vstats.get("comment_count",    0),
+                "video_duration_seconds": vstats.get("duration_seconds", 0),
+                "video_tags":             vstats.get("tags",             []),
+            })
+            if len(rows) >= max_comments:
+                return rows
+
+        next_page_token = body.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    return rows
+
+
+def fetch_youtube(
+    limit: int = 50,
+    months: int = None,
+    credentials: dict = None,
+    handle: str = None,
+    content: str = "video",
+    use_transcript: bool = False,
+    comments_per_video: int = 20,
+    transcript_max_chars: int = 10_000,
+) -> pd.DataFrame:
+    """
+    Fetch content from a YouTube channel.
+
+    Args:
+        limit (int): Number of videos to fetch. In "comments" mode, the number
+            of videos to pull comments from. Default 50. Ignored when months is set.
+        months (int): If set, only return content from the last N months.
+        credentials (dict): Dict with 'api_key' key.
+            Falls back to YOUTUBE_API_KEY env var.
+        handle (str): YouTube channel handle, e.g. '@h3productions',
+            'h3productions', a channel ID ('UCxxxxxx'), or a full channel URL.
+        content (str): Unit of analysis:
+            - "video" (default): one row per video.
+            - "comments": one row per comment; video-level stats travel as
+              video_* covariate columns (video_likes, video_views, etc.).
+        use_transcript (bool): Video mode only. When True, use the
+            auto-generated transcript as the text column instead of the
+            description. Falls back to description if unavailable. Default False.
+        comments_per_video (int): Comments mode only. Max top-level comments
+            per video. Default 20.
+        transcript_max_chars (int): Video transcript mode only. Maximum number of
+            characters to include from the transcript. Default 10,000. Set to None
+            for the full transcript (can be 100k+ chars for long videos).
+
+    Returns:
+        pd.DataFrame with columns:
+            post_id, timestamp, media_type, text, image_url,
+            likes, replies, reposts, quotes, views, shares
+        When content="comments": also includes video_id, video_title.
+        (reposts, quotes, shares are always 0 — not in the YouTube API)
+    """
+    if not handle:
+        raise ValueError(
+            "YouTube requires a channel handle. "
+            "Pass sm_handle='@h3productions' or sm_handle='UCxxxxxx'."
+        )
+    api_key = _load_youtube_credentials(credentials)
+    channel_id = _youtube_get_channel_id(handle, api_key)
+    uploads_playlist = _youtube_get_uploads_playlist(channel_id, api_key)
+
+    cutoff = None
+    if months is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    rows = []
+    next_page_token = None
+    page_size = min(limit if months is None else 50, 50)
+
+    while True:
+        params = {
+            "part": "snippet",
+            "playlistId": uploads_playlist,
+            "maxResults": page_size,
+            "key": api_key,
+        }
+        if next_page_token:
+            params["pageToken"] = next_page_token
+
+        r = requests.get(
+            f"{_YOUTUBE_BASE_URL}/playlistItems",
+            params=params,
+            timeout=15,
+        )
+        r.raise_for_status()
+        body = r.json()
+        items = body.get("items", [])
+        if not items:
+            break
+
+        page_rows = []
+        video_ids = []
+
+        for item in items:
+            snippet = item.get("snippet", {})
+            ts_str = snippet.get("publishedAt", "")
+
+            if cutoff and ts_str:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                if ts < cutoff:
+                    if video_ids and content != "comments":
+                        stats_map = _youtube_get_video_stats(video_ids, api_key)
+                        for row in page_rows:
+                            s = stats_map.get(row["post_id"], {})
+                            row["likes"]            = int(s.get("likeCount",       0) or 0)
+                            row["replies"]          = int(s.get("commentCount",    0) or 0)
+                            row["views"]            = int(s.get("viewCount",       0) or 0)
+                            row["duration_seconds"] = int(s.get("duration_seconds", 0) or 0)
+                            row["tags"]             = s.get("tags", [])
+                    rows.extend(page_rows)
+                    return pd.DataFrame(rows)
+
+            video_id = snippet.get("resourceId", {}).get("videoId", "")
+            title    = snippet.get("title", "")
+            thumbnails = snippet.get("thumbnails", {})
+            image_url = (
+                thumbnails.get("maxres", {}).get("url")
+                or thumbnails.get("high", {}).get("url")
+                or thumbnails.get("default", {}).get("url")
+                or ""
+            )
+
+            if content == "comments":
+                # Defer to comment fetching below — just record video metadata
+                page_rows.append({"_video_id": video_id, "_title": title})
+            else:
+                description = snippet.get("description", "")
+                if use_transcript:
+                    transcript = _youtube_get_transcript(video_id, max_chars=transcript_max_chars)
+                    if transcript:
+                        text = f"{title}\n\n{transcript}"
+                    else:
+                        if len(description) > 500:
+                            description = description[:500] + "..."
+                        text = f"{title}\n\n{description}".strip() if description else title
+                else:
+                    if len(description) > 500:
+                        description = description[:500] + "..."
+                    text = f"{title}\n\n{description}".strip() if description else title
+
+                page_rows.append({
+                    "post_id":          video_id,
+                    "timestamp":        ts_str,
+                    "media_type":       "VIDEO",
+                    "text":             text,
+                    "image_url":        image_url,
+                    "likes":            0,
+                    "replies":          0,
+                    "reposts":          0,
+                    "quotes":           0,
+                    "views":            0,
+                    "shares":           0,
+                    "duration_seconds": 0,
+                    "tags":             [],
+                })
+                video_ids.append(video_id)
+
+        if content == "comments":
+            # Batch-fetch video stats so they can travel with each comment row
+            page_video_ids = [m["_video_id"] for m in page_rows]
+            page_stats_map = _youtube_get_video_stats(page_video_ids, api_key) if page_video_ids else {}
+
+            for meta in page_rows:
+                vid = meta["_video_id"]
+                s = page_stats_map.get(vid, {})
+                vstats = {
+                    "likes":            int(s.get("likeCount",       0) or 0),
+                    "views":            int(s.get("viewCount",        0) or 0),
+                    "comment_count":    int(s.get("commentCount",     0) or 0),
+                    "duration_seconds": int(s.get("duration_seconds", 0) or 0),
+                    "tags":             s.get("tags", []),
+                }
+                comment_rows = _youtube_fetch_video_comments(
+                    vid, meta["_title"], api_key,
+                    max_comments=comments_per_video,
+                    video_stats=vstats,
+                )
+                rows.extend(comment_rows)
+            # For comments mode, limit is interpreted as number of videos
+            if months is None and len(page_rows) >= limit:
+                return pd.DataFrame(rows)
+        else:
+            # Batch-fetch stats for video/transcript modes
+            if video_ids:
+                stats_map = _youtube_get_video_stats(video_ids, api_key)
+                for row in page_rows:
+                    s = stats_map.get(row["post_id"], {})
+                    row["likes"]            = int(s.get("likeCount",       0) or 0)
+                    row["replies"]          = int(s.get("commentCount",    0) or 0)
+                    row["views"]            = int(s.get("viewCount",       0) or 0)
+                    row["duration_seconds"] = int(s.get("duration_seconds", 0) or 0)
+                    row["tags"]             = s.get("tags", [])
+
+            rows.extend(page_rows)
+
+            if months is None and len(rows) >= limit:
+                return pd.DataFrame(rows[:limit])
+
+        next_page_token = body.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    return pd.DataFrame(rows)
+
+
 # Dispatcher — extend this dict as new platforms are added
 _FETCHERS = {
-    "threads": fetch_threads,
-    "bluesky": fetch_bluesky,
-    "reddit":  fetch_reddit,
+    "threads":  fetch_threads,
+    "bluesky":  fetch_bluesky,
+    "reddit":   fetch_reddit,
+    "mastodon": fetch_mastodon,
+    "youtube":  fetch_youtube,
 }
 
 SUPPORTED_SOURCES = list(_FETCHERS.keys())
 
 
-def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, days: int = None, credentials: dict = None, handle: str = None) -> pd.DataFrame:
+def fetch_social_media(
+    sm_source: str,
+    limit: int = 50,
+    months: int = None,
+    days: int = None,
+    credentials: dict = None,
+    handle: str = None,
+    youtube_content: str = "video",
+    youtube_transcript: bool = False,
+    comments_per_video: int = 20,
+    youtube_transcript_max_chars: int = 10_000,
+) -> pd.DataFrame:
     """
     Fetch feed data from a social media platform.
 
     Args:
-        sm_source (str): Platform name. Currently supported: "threads", "bluesky", "reddit".
+        sm_source (str): Platform name. Supported: "threads", "bluesky", "reddit",
+            "mastodon", "youtube".
         limit (int): Number of posts/items to fetch. Ignored when months or days is set.
+            For YouTube "comments" mode, interpreted as number of videos to pull
+            comments from.
         months (int): If set, fetch all posts from the last N months.
         days (int): If set, fetch all posts from the last N days (overrides months).
-            Use days=1 for today's posts.
         credentials (dict): Platform-specific credentials. Falls back to env vars.
-        handle (str): Bluesky only. Handle of the account to fetch posts from.
+        handle (str): Account handle for platforms that require one.
+        youtube_content (str): YouTube only. Unit of analysis: "video" or "comments".
+        youtube_transcript (bool): YouTube video mode only. Use auto-generated
+            transcript as the text column instead of description. Default False.
+        comments_per_video (int): YouTube comments mode only. Default 20.
+        youtube_transcript_max_chars (int): YouTube transcript mode only. Max characters
+            to include. Default 10,000. Set to None for full transcript. Default 10,000.
 
     Returns:
         pd.DataFrame with a 'text' column (the feed content) plus
@@ -622,4 +1247,17 @@ def fetch_social_media(sm_source: str, limit: int = 50, months: int = None, days
         return fetch_bluesky(limit=limit, months=months, credentials=credentials, handle=handle)
     if key == "reddit":
         return fetch_reddit(limit=limit, months=months, days=days, credentials=credentials)
+    if key == "mastodon":
+        return fetch_mastodon(limit=limit, months=months, handle=handle)
+    if key == "youtube":
+        return fetch_youtube(
+            limit=limit,
+            months=months,
+            credentials=credentials,
+            handle=handle,
+            content=youtube_content,
+            use_transcript=youtube_transcript,
+            comments_per_video=comments_per_video,
+            transcript_max_chars=youtube_transcript_max_chars,
+        )
     return _FETCHERS[key](limit=limit, months=months, credentials=credentials)
