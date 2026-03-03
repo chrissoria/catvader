@@ -566,6 +566,15 @@ def fetch_reddit(limit: int = 50, months: int = None, days: int = None, credenti
             else f"{_REDDIT_BASE_URL}/r/{subreddit}/new.json"
         )
 
+    # TODO: Add comment fetching support.
+    # Each post's top-level comments are at /r/{sub}/comments/{post_id}.json
+    # (or /comments/{post_id} on oauth.reddit.com). Design decisions needed:
+    #   - How many top-level comments per post to fetch (e.g. top N by score)?
+    #   - Whether to include nested reply threads or flatten to top-level only.
+    #   - How to represent comments in the output DataFrame (one row per comment,
+    #     with parent post_id as a foreign key column).
+    # Would enable analysis of r/AskReddit answers, not just the questions.
+
     request_delay = 1.0 if has_oauth else 6.0
     rows = _reddit_paginate(url, headers, limit=limit, months=months, days=days, request_delay=request_delay)
     if not rows:
