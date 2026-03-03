@@ -1,5 +1,9 @@
 # cat-vader
 
+<p align="center">
+  <img src="logo.png" alt="CatVader logo" width="180"/>
+</p>
+
 CatVader: An AI Pipeline for Classifying and Exploring Social Media Data
 
 [![PyPI - Version](https://img.shields.io/pypi/v/cat-vader.svg)](https://pypi.org/project/cat-vader)
