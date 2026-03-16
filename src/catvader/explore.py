@@ -1,19 +1,18 @@
 """
 Category exploration functions for CatVader.
 
-This module provides raw category extraction from text inputs,
-returning unprocessed category lists for frequency/saturation analysis.
+Thin wrapper around cat_stack.explore() that adds social media fetching
+and context injection. Returns raw category lists (with duplicates) for
+frequency/saturation analysis.
 """
 
-import pandas as pd
+import cat_stack
 
 from ._social_media import fetch_social_media, SUPPORTED_SOURCES
 
 __all__ = [
     "explore",
 ]
-
-from .text_functions import explore_common_categories
 
 
 def _build_social_media_context(platform, handle, hashtags, post_metadata):
@@ -46,19 +45,8 @@ def explore(
     handle: str = None,
     hashtags=None,
     post_metadata: dict = None,
-    max_categories=12,
-    categories_per_chunk=10,
-    divisions=12,
-    user_model="gpt-5",
-    creativity=None,
-    specificity="broad",
-    research_question=None,
-    filename=None,
-    model_source="auto",
-    iterations=8,
-    random_state=None,
-    focus=None,
-    progress_callback=None,
+    # Everything else passed through to cat_stack.explore()
+    **kwargs,
 ):
     """
     Explore categories in text data, returning the raw extracted list.
@@ -73,23 +61,20 @@ def explore(
             Omit when using sm_source (text is fetched automatically).
         api_key (str): API key for the model provider.
         sm_source (str): Social media platform to pull feed text from.
-            Supported: "threads"
+            Supported: "threads", "bluesky", "reddit", "mastodon", "youtube"
         sm_limit (int): Number of posts to fetch. Default 50.
+        sm_months (int): Fetch all posts from the last N months.
         sm_credentials (dict): Platform credentials. Falls back to env vars.
+        platform (str): Social media platform name for prompt context.
+        handle (str): Post author handle for prompt context.
+        hashtags (str or list): Hashtags for prompt context.
+        post_metadata (dict): Additional metadata for prompt context.
         description (str): The survey question or description of the data.
-        max_categories (int): Maximum categories per chunk (passed through).
-        categories_per_chunk (int): Categories to extract per chunk.
-        divisions (int): Number of chunks to divide data into.
-        user_model (str): Model name to use. Default "gpt-5".
-        creativity (float): Temperature setting. None uses model default.
-        specificity (str): "broad" or "specific" category granularity.
-        research_question (str): Optional research context.
-        filename (str): Optional CSV filename to save raw category list.
-        model_source (str): Provider - "auto", "openai", "anthropic", etc.
-        iterations (int): Number of passes over the data.
-        random_state (int): Random seed for reproducibility.
-        focus (str): Optional focus instruction for category extraction.
-        progress_callback (callable): Optional callback for progress updates.
+        **kwargs: All additional parameters are passed through to
+            cat_stack.explore(). This includes: max_categories,
+            categories_per_chunk, divisions, user_model, creativity,
+            specificity, research_question, filename, model_source,
+            iterations, random_state, focus, progress_callback, etc.
 
     Returns:
         list[str]: Every category string extracted from every chunk across
@@ -106,7 +91,6 @@ def explore(
         ...     divisions=5,
         ... )
         >>> print(len(raw_categories))  # ~150
-        >>> print(raw_categories[:5])
     """
     # Fetch feed text from social media when sm_source is set
     if sm_source is not None:
@@ -126,29 +110,9 @@ def explore(
     if sm_context:
         description = f"{sm_context}\n{description}".strip() if description else sm_context
 
-    raw_items = explore_common_categories(
-        survey_input=input_data,
+    return cat_stack.explore(
+        input_data=input_data,
         api_key=api_key,
-        survey_question=description,
-        max_categories=max_categories,
-        categories_per_chunk=categories_per_chunk,
-        divisions=divisions,
-        user_model=user_model,
-        creativity=creativity,
-        specificity=specificity,
-        research_question=research_question,
-        filename=None,  # We handle saving ourselves
-        model_source=model_source,
-        iterations=iterations,
-        random_state=random_state,
-        focus=focus,
-        progress_callback=progress_callback,
-        return_raw=True,
+        description=description,
+        **kwargs,
     )
-
-    if filename:
-        df = pd.DataFrame(raw_items, columns=["Category"])
-        df.to_csv(filename, index=False)
-        print(f"Raw categories saved to {filename}")
-
-    return raw_items

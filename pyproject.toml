@@ -25,16 +25,14 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
+  "cat-stack>=0.1.0",
   "pandas",
   "tqdm",
   "requests",
-  "openai",
-  "anthropic",
-  "perplexityai"
 ]
 
 [project.optional-dependencies]
-pdf = ["PyMuPDF>=1.23.0"]
+pdf = ["cat-stack[pdf]"]
 
 [project.urls]
 Documentation = "https://github.com/chrissoria/cat-vader#readme"

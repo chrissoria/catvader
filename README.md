@@ -49,9 +49,11 @@ Social media context (platform, author handle, hashtags, engagement metrics) can
 pip install cat-vader
 ```
 
-For PDF support:
+Optional extras (provided by [cat-stack](https://github.com/chrissoria/cat-stack)):
 ```console
-pip install cat-vader[pdf]
+pip install cat-vader[pdf]           # PDF classification support
+pip install cat-stack[embeddings]    # Embedding similarity scores
+pip install cat-stack[formatter]     # JSON formatter fallback
 ```
 
 -----
@@ -147,14 +149,34 @@ Supports both **single-model** and **multi-model ensemble** classification for i
 - `user_model` (str, default=`"gpt-5"`): Model to use
 - `mode` (str, default=`"image"`): PDF processing mode — `"image"`, `"text"`, or `"both"`
 - `creativity` (float, optional): Temperature setting (0.0–1.0)
+- `multi_label` (bool, default=`True`): If `True`, multiple categories can be assigned per input. If `False`, the model picks the single best category. Output format is unchanged—still one 0/1 column per category.
+- `categories_per_call` (int, default=`None`): Maximum categories per LLM call. Splits large category lists into chunks, runs a separate call per chunk, and merges results. Useful for large category sets (20+).
 - `chain_of_thought` (bool, default=`False`): Enable step-by-step reasoning
+- `chain_of_verification` (bool, default=`False`): Multi-prompt verification loop (3-5x cost). Not recommended for classification.
 - `step_back_prompt` (bool, default=`False`): Enable step-back prompting (results inconsistent — see Best Practices)
 - `context_prompt` (bool, default=`False`): Add generic expert context to prompts (no consistent benefit observed)
 - `filename` (str, optional): Output filename for CSV
 - `save_directory` (str, optional): Directory to save results
 - `model_source` (str, default=`"auto"`): Provider — `"auto"`, `"openai"`, `"anthropic"`, `"google"`, `"mistral"`, `"perplexity"`, `"huggingface"`, `"xai"`
-- `models` (list, optional): For multi-model ensemble, list of `(model, provider, api_key)` tuples
-- `consensus_threshold` (str or float, default=`"majority"`): Agreement threshold for ensemble mode
+- `models` (list, optional): For multi-model ensemble, list of `(model, provider, api_key)` or `(model, provider, api_key, config_dict)` tuples
+- `consensus_threshold` (str or float, default=`"majority"`): Agreement threshold for ensemble mode. Options: `"unanimous"` (100%), `"majority"` (50%), `"two-thirds"` (67%), or a custom float.
+- `parallel` (bool, default=`None`): Controls concurrent vs sequential model execution in ensemble mode. `None` auto-detects, `True` forces parallel, `False` forces sequential.
+- `batch_mode` (bool, default=`False`): Submit the entire job as an async batch request. Supported: OpenAI, Anthropic, Google, Mistral, xAI. Reduces API costs by ~50%. Not compatible with PDF/image inputs.
+- `batch_poll_interval` (float, default=`30.0`): Seconds between status polls when `batch_mode=True`.
+- `batch_timeout` (float, default=`86400.0`): Max seconds to wait for a batch job.
+- `embeddings` (bool, default=`False`): Add embedding-based similarity scores (`category_N_similarity` columns). Text input only. Requires `pip install cat-stack[embeddings]`.
+- `category_descriptions` (dict, optional): Richer text per category for embedding similarity. Only used when `embeddings=True`.
+- `embedding_tiebreaker` (bool, default=`False`): Use embedding centroid similarity to break ensemble ties. Requires `pip install cat-stack[embeddings]`.
+- `json_formatter` (bool, default=`False`): Use a local fine-tuned model to fix malformed JSON output. Requires `pip install cat-stack[formatter]`.
+- `add_other` (str or bool, default=`"prompt"`): Controls auto-addition of "Other" catch-all category. `"prompt"` asks the user, `True` adds silently, `False` never adds.
+- `check_verbosity` (bool, default=`True`): Check whether categories have descriptions and examples (1 API call). Set to `False` to skip.
+- `safety` (bool, default=`False`): Save progress after each row. Requires `filename`.
+- `row_delay` (float, default=`0.0`): Seconds between rows. Useful for rate-limited APIs.
+- `max_retries` (int, default=`5`): Max retries per failed API call.
+- `fail_strategy` (str, default=`"partial"`): `"partial"` returns results with failed rows marked; `"strict"` raises an error.
+- `max_workers` (int, default=`None`): Max parallel workers. `None` auto-selects.
+- `auto_download` (bool, default=`False`): Auto-download missing Ollama models.
+- `progress_callback` (callable, optional): Callback for progress updates.
 - `thinking_budget` (int, default=`0`): Token budget for model reasoning/thinking. Behavior varies by provider:
 
 | Provider | `thinking_budget=0` | `thinking_budget > 0` |
@@ -449,17 +471,18 @@ features = cat.image_features(
 
 ---
 
-## Deprecated Functions
+## Migration from Earlier Versions
 
-The following functions are deprecated and will be removed in a future version. Please use `classify()` instead.
+The following functions were removed in v1.13.0. Use the unified API instead:
 
-| Deprecated Function | Replacement |
-|---------------------|-------------|
+| Removed Function | Replacement |
+|------------------|-------------|
 | `multi_class()` | `classify(input_data=texts, ...)` |
 | `image_multi_class()` | `classify(input_data=images, ...)` |
 | `pdf_multi_class()` | `classify(input_data=pdfs, ...)` |
 | `explore_corpus()` | `extract(input_data=texts, ...)` |
 | `explore_common_categories()` | `extract(input_data=texts, ...)` |
+| `classify_ensemble()` | `classify(models=[...], ...)` |
 
 ---
 

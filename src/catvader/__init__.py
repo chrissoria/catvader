@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025-present Christopher Soria <chrissoria@berkeley.edu>
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from .__about__ import (
     __version__,
@@ -12,63 +12,35 @@ from .__about__ import (
 )
 
 # =============================================================================
-# Public API - Organized by function type
+# Public API - Main entry points (cat-vader wrappers with social media support)
 # =============================================================================
-
-# Main entry points
+from .classify import classify
 from .extract import extract
 from .explore import explore
-from .classify import classify
-
-# Category analysis
-from ._category_analysis import has_other_category, check_category_verbosity
 
 # =============================================================================
-# Provider utilities (for advanced users)
+# Provider utilities — re-exported from cat_stack for convenience
 # =============================================================================
-from ._providers import (
+from cat_stack import (
     UnifiedLLMClient,
     detect_provider,
+    PROVIDER_CONFIG,
     set_ollama_endpoint,
     check_ollama_running,
     list_ollama_models,
     check_ollama_model,
     pull_ollama_model,
-    PROVIDER_CONFIG,
-)
-
-# =============================================================================
-# Backward compatibility - Deprecated functions
-# These are kept for backward compatibility but users should migrate to the
-# new unified API (extract, classify)
-# =============================================================================
-
-# Extraction functions (use extract() instead)
-from .extract import (
-    explore_common_categories,
-    explore_corpus,
-    explore_image_categories,
-    explore_pdf_categories,
-)
-
-# Classification functions (use classify() instead)
-from .classify import (
-    classify_ensemble,
-    multi_class,
-    image_multi_class,
-    pdf_multi_class,
-)
-
-# =============================================================================
-# Additional utilities from existing modules (backward compatibility)
-# =============================================================================
-from .text_functions import (
+    # Category analysis
+    has_other_category,
+    check_category_verbosity,
+    # Batch exceptions
+    BatchJobExpiredError,
+    BatchJobFailedError,
+    # JSON / validation utilities
     build_json_schema,
     extract_json,
     validate_classification_json,
-)
-
-from .image_functions import (
+    # Image utilities
     image_score_drawing,
     image_features,
 )
@@ -85,24 +57,19 @@ __all__ = [
     # Provider utilities
     "UnifiedLLMClient",
     "detect_provider",
+    "PROVIDER_CONFIG",
     "set_ollama_endpoint",
     "check_ollama_running",
     "list_ollama_models",
     "check_ollama_model",
     "pull_ollama_model",
-    "PROVIDER_CONFIG",
-    # Deprecated (backward compatibility)
-    "explore_common_categories",
-    "explore_corpus",
-    "explore_image_categories",
-    "explore_pdf_categories",
-    "classify_ensemble",
-    "multi_class",
-    "image_multi_class",
-    "pdf_multi_class",
-    "image_score_drawing",
-    "image_features",
+    # Batch exceptions
+    "BatchJobExpiredError",
+    "BatchJobFailedError",
+    # Utilities
     "build_json_schema",
     "extract_json",
     "validate_classification_json",
+    "image_score_drawing",
+    "image_features",
 ]
