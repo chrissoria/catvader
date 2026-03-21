@@ -23,7 +23,11 @@ from urllib.parse import urlparse
 import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        pass
 
 _ENV_PATH = os.path.expanduser(
     "~/Documents/Important_Docs/social_media_bot/.env"
