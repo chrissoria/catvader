@@ -1,12 +1,12 @@
 """
 Category exploration functions for CatVader.
 
-Thin wrapper around cat_stack.explore() that adds social media fetching
+Thin wrapper around catstack.explore() that adds social media fetching
 and context injection. Returns raw category lists (with duplicates) for
 frequency/saturation analysis.
 """
 
-import cat_stack
+import catstack
 
 from ._social_media import fetch_social_media, SUPPORTED_SOURCES
 
@@ -45,7 +45,7 @@ def explore(
     handle: str = None,
     hashtags=None,
     post_metadata: dict = None,
-    # Everything else passed through to cat_stack.explore()
+    # Everything else passed through to catstack.explore()
     **kwargs,
 ):
     """
@@ -71,7 +71,7 @@ def explore(
         post_metadata (dict): Additional metadata for prompt context.
         description (str): The survey question or description of the data.
         **kwargs: All additional parameters are passed through to
-            cat_stack.explore(). This includes: max_categories,
+            catstack.explore(). This includes: max_categories,
             categories_per_chunk, divisions, user_model, creativity,
             specificity, research_question, filename, model_source,
             iterations, random_state, focus, progress_callback, etc.
@@ -110,7 +110,7 @@ def explore(
     if sm_context:
         description = f"{sm_context}\n{description}".strip() if description else sm_context
 
-    return cat_stack.explore(
+    return catstack.explore(
         input_data=input_data,
         api_key=api_key,
         description=description,

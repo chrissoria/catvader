@@ -19,9 +19,9 @@ from .extract import extract
 from .explore import explore
 
 # =============================================================================
-# Provider utilities — re-exported from cat_stack for convenience
+# Provider utilities — re-exported from catstack for convenience
 # =============================================================================
-from cat_stack import (
+from catstack import (
     UnifiedLLMClient,
     detect_provider,
     PROVIDER_CONFIG,

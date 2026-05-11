@@ -1,11 +1,11 @@
 """
 Category extraction functions for CatVader.
 
-Thin wrapper around cat_stack.extract() that adds social media fetching
+Thin wrapper around catstack.extract() that adds social media fetching
 and context injection.
 """
 
-import cat_stack
+import catstack
 
 from ._social_media import fetch_social_media, SUPPORTED_SOURCES
 
@@ -44,13 +44,13 @@ def extract(
     hashtags=None,
     post_metadata: dict = None,
     description="",
-    # Everything else passed through to cat_stack.extract()
+    # Everything else passed through to catstack.extract()
     **kwargs,
 ):
     """
     Unified category extraction function for text, image, and PDF inputs.
 
-    This function dispatches to cat_stack.extract() after handling social
+    This function dispatches to catstack.extract() after handling social
     media fetching and context injection.
 
     Args:
@@ -70,9 +70,9 @@ def extract(
         hashtags (str or list): Hashtags for prompt context.
         post_metadata (dict): Additional metadata for prompt context.
         description (str): Description of the input data. Maps to
-            cat_stack's survey_question parameter.
+            catstack's survey_question parameter.
         **kwargs: All additional parameters are passed through to
-            cat_stack.extract(). This includes: input_type, max_categories,
+            catstack.extract(). This includes: input_type, max_categories,
             categories_per_chunk, divisions, user_model, creativity,
             specificity, research_question, mode, filename, model_source,
             iterations, random_state, focus, progress_callback, etc.
@@ -119,7 +119,7 @@ def extract(
     if sm_context:
         description = f"{sm_context}\n{description}".strip() if description else sm_context
 
-    return cat_stack.extract(
+    return catstack.extract(
         input_data=input_data,
         api_key=api_key,
         survey_question=description,

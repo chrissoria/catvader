@@ -11,6 +11,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.13.2] - 2026-05-11
+
+### Added
+- **`cat_vader` import alias**: `import cat_vader` now works alongside the
+  canonical `import catvader`; both resolve to the same module object. This
+  makes the import name consistent with the underscored convention used
+  elsewhere in the cat-* family without breaking existing code.
+
+### Changed
+- **Internal imports** of `cat_stack` rewritten to `catstack`. Now requires
+  `cat-stack>=1.0.19`.
+
+---
+
 ## [1.12.0] - 2026-03-03
 
 ### Added

@@ -1,14 +1,14 @@
 """
 Classification functions for CatVader.
 
-Thin wrapper around cat_stack.classify() that adds social media fetching,
+Thin wrapper around catstack.classify() that adds social media fetching,
 context injection, and engagement metric attachment.
 """
 
 from typing import Union
 import pandas as pd
 
-import cat_stack
+import catstack
 
 from ._social_media import fetch_social_media, SUPPORTED_SOURCES
 
@@ -57,7 +57,7 @@ def classify(
     # Mapped params
     description="",
     feed_question: str = "",
-    # Everything else passed through to cat_stack.classify()
+    # Everything else passed through to catstack.classify()
     **kwargs,
 ):
     """
@@ -69,7 +69,7 @@ def classify(
     Social media parameters (sm_*) allow automatic fetching from platforms.
     Context fields (platform, handle, hashtags, post_metadata) are injected
     into the classification prompt. All other parameters are passed through
-    to cat_stack.classify().
+    to catstack.classify().
 
     Args:
         input_data: The data to classify. Can be:
@@ -99,9 +99,9 @@ def classify(
         sm_timezone (str): Timezone for day/month columns. Default "UTC".
         description (str): Description of the input data context.
         feed_question (str): Context for category discovery (maps to
-            cat_stack's survey_question parameter).
+            catstack's survey_question parameter).
         **kwargs: All additional parameters are passed through to
-            cat_stack.classify(). This includes: user_model, model_source,
+            catstack.classify(). This includes: user_model, model_source,
             creativity, safety, chain_of_thought, step_back_prompt,
             thinking_budget, models, consensus_threshold, batch_mode,
             embeddings, json_formatter, multi_label, add_other,
@@ -185,10 +185,10 @@ def classify(
         description = f"{sm_context}\n{description}".strip() if description else sm_context
 
     # =========================================================================
-    # Delegate to cat_stack.classify() — it handles models list building,
+    # Delegate to catstack.classify() — it handles models list building,
     # add_other, check_verbosity, strategy warnings, batch mode, etc.
     # =========================================================================
-    result = cat_stack.classify(
+    result = catstack.classify(
         input_data=input_data,
         categories=categories,
         api_key=api_key,
