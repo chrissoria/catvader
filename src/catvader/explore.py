@@ -114,5 +114,6 @@ def explore(
         input_data=input_data,
         api_key=api_key,
         description=description,
+        domain="social",
         **kwargs,
     )
