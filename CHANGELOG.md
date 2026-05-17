@@ -11,6 +11,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.13.3] - 2026-05-16
+
+### Changed
+- **`extract()` and `explore()`** now pass `domain="social"` to `catstack.extract()`
+  and `catstack.explore()`, selecting social-media-specific prompt templates (uses
+  "posts" language in the semantic merge step). Requires `cat-stack >= 1.0.20`.
+
+---
+
 ## [1.13.2] - 2026-05-11
 
 ### Added
