@@ -7,6 +7,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.13.5] - 2026-07-03
+
+### Fixed
+- **`extract()` no longer triggers a `DeprecationWarning` from cat-stack.**
+  The wrapper forwarded the deprecated `survey_question=` parameter to
+  `catstack.extract()`; it now passes the canonical `description=` (both
+  land in the same resolved description, so behavior is unchanged).
+  cat-stack 2.0.0 (stable) is out; the existing `cat-stack>=1.6.3` pin
+  resolves to it automatically.
+
+---
+
 ## [Unreleased]
 
 ---
